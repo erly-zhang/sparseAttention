@@ -1,0 +1,36 @@
+# Logs
+*.log
+nohup.out
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Experiment outputs and downloaded data
+experiments/outputs/
+experiments/data/
+datasets/
+model/
+ruler_data/
+
+# Attention map outputs and analysis artifacts
+attention_map/outputs/
+attention_map/outputs_*/
+attention_map/analysis/
+
+# Third-party cloned repositories (install separately)
+MInference/
+RULER/
+FlexPrefill/
+
+# HuggingFace cache
+.cache/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
