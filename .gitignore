@@ -16,15 +16,13 @@ datasets/
 model/
 ruler_data/
 
-# Attention map outputs and analysis artifacts
-attention_map/outputs/
-attention_map/outputs_*/
-attention_map/analysis/
-
 # Third-party cloned repositories (install separately)
 MInference/
 RULER/
 FlexPrefill/
+MoA/
+DAM/
+duo-attention/
 
 # HuggingFace cache
 .cache/

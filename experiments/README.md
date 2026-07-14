@@ -66,7 +66,6 @@ Before publishing, check:
 ```bash
 python -m compileall experiments
 find experiments -type f -name '*.bak_*' -print
-find experiments/outputs -maxdepth 2 -type f | head
 ```
 
 Do not commit generated outputs unless they are deliberately curated summaries.
