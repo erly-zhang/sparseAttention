@@ -1,0 +1,11 @@
+# Minimal runtime dependencies for the project-specific experiment code.
+# Install PyTorch separately using the CUDA build appropriate for the machine.
+accelerate
+numpy
+scikit-learn
+torch
+transformers
+
+# Optional Graph2Vec path. The SVD-KMeans and BMM paths do not require these.
+networkx
+karateclub

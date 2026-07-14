@@ -1,0 +1,31 @@
+# Python/runtime noise
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# Local experiment artifacts
+data/
+outputs/
+*.log
+*.out
+*.err
+
+# Large tensors / serialized intermediate files
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.npy
+*.npz
+*.pkl
+
+# One-off backups produced during remote iteration
+*.bak
+*.bak_*
+
+# OS/editor metadata
+.DS_Store
+*.swp
+*~

@@ -18,6 +18,7 @@ import argparse
 import json
 import logging
 import math
+import random
 import re
 import sys
 from abc import ABC, abstractmethod
@@ -101,12 +102,49 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--mask_method",
         type=str,
-        choices=["top_p", "top_k", "top_p_local"],
+        choices=["top_p", "top_k", "top_p_local", "adaptive_top_p", "top_ratio"],
         default="top_p",
     )
     p.add_argument("--top_p", type=float, default=0.95)
     p.add_argument("--top_k", type=int, default=128)
+    p.add_argument(
+        "--top_ratio",
+        type=float,
+        default=0.0642,
+        help="For mask_method=top_ratio, keep the top fraction of valid tokens by attention score.",
+    )
     p.add_argument("--local_window", type=int, default=256)
+    p.add_argument(
+        "--adaptive_top_p_min",
+        type=float,
+        default=0.65,
+        help="Minimum top_p for adaptive_top_p (FlexPrefill proxy); scales up toward --top_p near query",
+    )
+    p.add_argument(
+        "--representative_selection",
+        type=str,
+        choices=["coverage", "random", "survey_fixed"],
+        default="coverage",
+        help="How to pick per-layer representative head during phase-1",
+    )
+    p.add_argument(
+        "--sparse_head_indices",
+        type=str,
+        default=None,
+        help='Heads receiving sparse mask: comma-separated ints, "even", or "odd" (DuoAttention proxy)',
+    )
+    p.add_argument(
+        "--baseline_id",
+        type=str,
+        default=None,
+        help="Load settings from experiments/baseline_registry.json and write experiment_manifest.json",
+    )
+    p.add_argument(
+        "--debug_layers",
+        type=str,
+        default=None,
+        help='Smoke/debug: only sparsify these layer indices, e.g. "0,1"',
+    )
 
     p.add_argument("--apply_prefill", type=str_to_bool, default=False)
     p.add_argument("--apply_decode", type=str_to_bool, default=False)
@@ -227,7 +265,23 @@ def parse_args() -> argparse.Namespace:
             "ff=full+full, ss=sparse+sparse, sf=sparse+full, fs=full+sparse"
         ),
     )
+    p.add_argument(
+        "--ff_reference_roots",
+        type=str,
+        default=None,
+        help=(
+            "Optional comma-separated output roots containing task_eval.json files. "
+            "When ff is requested, prefill_full_decode_full is loaded by sample_id "
+            "from these roots instead of recomputing dense full-attention generation."
+        ),
+    )
     return p.parse_args()
+
+
+def parse_debug_layers(spec: Optional[str]) -> Optional[set]:
+    if spec is None or str(spec).strip() == "":
+        return None
+    return {int(x.strip()) for x in str(spec).split(",") if x.strip()}
 
 
 EVAL_MODE_COMBO_SPECS: Dict[str, Dict[str, Any]] = {
@@ -273,14 +327,16 @@ def load_model_and_tokenizer(args: argparse.Namespace):
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_name_or_path, trust_remote_code=True
     )
+    device_map = None if args.device == "cpu" else {"": args.device}
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
         torch_dtype=dtype,
-        device_map=None,
+        device_map=device_map,
         trust_remote_code=True,
         attn_implementation="eager",
+        low_cpu_mem_usage=True,
     )
-    if args.device != "cpu":
+    if args.device == "cpu":
         model = model.to(args.device)
     model.eval()
     return model, tokenizer
@@ -568,6 +624,83 @@ class TopKMaskBuilder(SparseMaskBuilder):
         return out & valid
 
 
+class TopRatioMaskBuilder(SparseMaskBuilder):
+    """Keep a fixed fraction of causal-valid tokens with highest attention score."""
+
+    def __init__(self, top_ratio: float = 0.0642) -> None:
+        if not 0.0 < top_ratio <= 1.0:
+            raise ValueError(f"top_ratio must be in (0, 1], got {top_ratio}")
+        self.top_ratio = float(top_ratio)
+
+    def build(
+        self,
+        attn: torch.Tensor,
+        *,
+        query_abs_positions: Optional[torch.Tensor] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        attn = normalize_attention(attn)
+        num_q, seq_len = attn.shape
+        device = attn.device
+
+        if query_abs_positions is None:
+            query_abs_positions = query_abs_positions_from_last_q(seq_len, num_q).to(device)
+        else:
+            query_abs_positions = query_abs_positions.to(device)
+
+        valid = build_causal_valid_mask(num_q, seq_len, query_abs_positions, device=device)
+        out = torch.zeros_like(valid, dtype=torch.bool)
+
+        for row in range(num_q):
+            abs_q = int(query_abs_positions[row].item())
+            causal_len = abs_q + 1
+            keep_k = max(1, int(math.ceil(causal_len * self.top_ratio)))
+            row_attn = attn[row, :causal_len]
+            top_idx = torch.topk(row_attn, k=min(keep_k, causal_len), largest=True).indices
+            out[row, top_idx] = True
+
+        return out & valid
+
+
+class AdaptiveTopPMaskBuilder(SparseMaskBuilder):
+    """FlexPrefill proxy: higher top_p for query rows closer to sequence end."""
+
+    def __init__(self, top_p: float = 0.85, min_top_p: float = 0.65) -> None:
+        self.top_p = top_p
+        self.min_top_p = min(min_top_p, top_p)
+
+    def build(
+        self,
+        attn: torch.Tensor,
+        *,
+        query_abs_positions: Optional[torch.Tensor] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        attn = normalize_attention(attn)
+        num_q, seq_len = attn.shape
+        device = attn.device
+
+        if query_abs_positions is None:
+            query_abs_positions = query_abs_positions_from_last_q(seq_len, num_q).to(device)
+        else:
+            query_abs_positions = query_abs_positions.to(device)
+
+        valid = build_causal_valid_mask(num_q, seq_len, query_abs_positions, device=device)
+        out = torch.zeros_like(valid, dtype=torch.bool)
+        span = max(self.top_p - self.min_top_p, 1e-6)
+
+        for row in range(num_q):
+            # Rows later in last_q window (closer to query end) get higher top_p.
+            t = row / max(num_q - 1, 1)
+            row_top_p = self.min_top_p + span * t
+            row_attn = attn[row : row + 1]
+            row_pos = query_abs_positions[row : row + 1]
+            row_mask = build_top_p_mask(row_attn, row_top_p, query_abs_positions=row_pos)
+            out[row] = row_mask[0]
+
+        return out & valid
+
+
 class TopPWithLocalWindowMaskBuilder(SparseMaskBuilder):
     def __init__(self, top_p: float = 0.95, local_window: int = 256) -> None:
         self.top_p = top_p
@@ -606,11 +739,94 @@ def get_mask_builder(args: argparse.Namespace) -> SparseMaskBuilder:
         return TopPMaskBuilder(top_p=args.top_p)
     if args.mask_method == "top_k":
         return TopKMaskBuilder(top_k=args.top_k)
+    if args.mask_method == "top_ratio":
+        return TopRatioMaskBuilder(top_ratio=args.top_ratio)
     if args.mask_method == "top_p_local":
         return TopPWithLocalWindowMaskBuilder(
             top_p=args.top_p, local_window=args.local_window
         )
+    if args.mask_method == "adaptive_top_p":
+        return AdaptiveTopPMaskBuilder(
+            top_p=args.top_p, min_top_p=args.adaptive_top_p_min
+        )
     raise ValueError(f"Unknown mask_method: {args.mask_method}")
+
+
+def parse_sparse_head_indices(
+    spec: Optional[str], num_heads: int
+) -> Optional[List[int]]:
+    if spec is None or str(spec).strip() == "":
+        return None
+    spec = str(spec).strip().lower()
+    if spec == "even":
+        return [h for h in range(num_heads) if h % 2 == 0]
+    if spec == "odd":
+        return [h for h in range(num_heads) if h % 2 == 1]
+    return [int(x.strip()) for x in spec.split(",") if x.strip()]
+
+
+_BASELINE_REGISTRY_PATH = Path(__file__).resolve().parent / "baseline_registry.json"
+
+
+def load_baseline_registry() -> Dict[str, Any]:
+    if not _BASELINE_REGISTRY_PATH.is_file():
+        raise FileNotFoundError(f"Missing baseline registry: {_BASELINE_REGISTRY_PATH}")
+    return json.loads(_BASELINE_REGISTRY_PATH.read_text(encoding="utf-8"))
+
+
+def apply_baseline_config(args: argparse.Namespace) -> Dict[str, Any]:
+    registry = load_baseline_registry()
+    baselines = registry.get("baselines", {})
+    if args.baseline_id not in baselines:
+        raise KeyError(
+            f"Unknown baseline_id={args.baseline_id!r}; "
+            f"available: {sorted(baselines.keys())}"
+        )
+    cfg = baselines[args.baseline_id]
+    args.representative_selection = cfg.get(
+        "representative_selection", args.representative_selection
+    )
+    args.mask_method = cfg.get("mask_method", args.mask_method)
+    args.top_p = float(cfg.get("top_p", args.top_p))
+    args.top_k = int(cfg.get("top_k", args.top_k))
+    args.top_ratio = float(cfg.get("top_ratio", args.top_ratio))
+    args.local_window = int(cfg.get("local_window", args.local_window))
+    if "adaptive_top_p_min" in cfg:
+        args.adaptive_top_p_min = float(cfg["adaptive_top_p_min"])
+    sparse = cfg.get("sparse_head_indices")
+    if sparse is not None:
+        args.sparse_head_indices = str(sparse)
+    return cfg
+
+
+def write_experiment_manifest(
+    output_dir: Path,
+    args: argparse.Namespace,
+    baseline_cfg: Optional[Dict[str, Any]],
+) -> Path:
+    manifest: Dict[str, Any] = {
+        "baseline_id": args.baseline_id,
+        "method_name": (baseline_cfg or {}).get("method_name", "Single-Cluster"),
+        "paper_source": (baseline_cfg or {}).get("paper_source", ""),
+        "approximation_notes": (baseline_cfg or {}).get("approximation_notes", ""),
+        "representative_selection": args.representative_selection,
+        "mask_method": args.mask_method,
+        "top_p": args.top_p,
+        "top_k": args.top_k,
+        "top_ratio": args.top_ratio,
+        "local_window": args.local_window,
+        "sparse_head_indices": args.sparse_head_indices,
+        "seed": args.seed,
+        "eval_num_samples": args.eval_num_samples,
+        "head_selection_num_samples": args.head_selection_num_samples,
+        "eval_mode_combos": args.eval_mode_combos,
+        "model_name_or_path": args.model_name_or_path,
+        "data_path": args.data_path,
+        "output_dir": str(output_dir),
+    }
+    path = output_dir / "experiment_manifest.json"
+    path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -696,6 +912,34 @@ def select_representative_head(
     coverage_score_per_head = similarity.mean(dim=1)
     representative_head = int(coverage_score_per_head.argmax().item())
     return representative_head, coverage_score_per_head
+
+
+def select_representative_head_by_mode(
+    similarity: torch.Tensor,
+    *,
+    mode: str,
+    layer_idx: int,
+    num_heads: int,
+    num_layers: int,
+    seed: int,
+) -> Tuple[int, torch.Tensor]:
+    coverage_score_per_head = similarity.mean(dim=1)
+    if mode == "coverage":
+        rep = int(coverage_score_per_head.argmax().item())
+    elif mode == "random":
+        rng = random.Random(seed + layer_idx * 10007)
+        rep = rng.randrange(num_heads)
+    elif mode == "survey_fixed":
+        third = max(num_layers // 3, 1)
+        if layer_idx < third:
+            rep = 0
+        elif layer_idx < 2 * third:
+            rep = num_heads // 2
+        else:
+            rep = num_heads - 1
+    else:
+        raise ValueError(f"Unknown representative_selection: {mode}")
+    return rep, coverage_score_per_head
 
 
 def build_layer_shared_masks(
@@ -1077,8 +1321,12 @@ class SharedMaskAttentionController:
     apply_decode: bool
     last_q: int
     analysis_seq_len: int
+    sparse_head_indices: Optional[List[int]] = None
+    debug_layers: Optional[set] = None
 
     def should_apply(self, stage: str, layer_idx: int) -> bool:
+        if self.debug_layers is not None and layer_idx not in self.debug_layers:
+            return False
         if layer_idx not in self.layer_to_mask:
             return False
         if stage == "prefill":
@@ -1149,6 +1397,7 @@ _PATCH_STATE: Dict[str, Any] = {
 def apply_shared_sparse_mask_to_attention_scores(
     attn_scores: torch.Tensor,
     shared_mask: torch.Tensor,
+    sparse_head_indices: Optional[List[int]] = None,
 ) -> torch.Tensor:
     """
     Apply shared sparse positions to attention scores before softmax.
@@ -1156,6 +1405,7 @@ def apply_shared_sparse_mask_to_attention_scores(
     Args:
         attn_scores: [batch, num_heads, q_len, kv_len]
         shared_mask: [q_len, kv_len] bool, True = keep
+        sparse_head_indices: if set, only these heads are sparsified (DuoAttention proxy)
     """
     if shared_mask is None:
         return attn_scores
@@ -1175,7 +1425,14 @@ def apply_shared_sparse_mask_to_attention_scores(
         attn_scores.shape[0], attn_scores.shape[1], q_len, kv_len
     )
     finfo = torch.finfo(attn_scores.dtype)
-    return attn_scores.masked_fill(~mask, finfo.min)
+    masked = attn_scores.masked_fill(~mask, finfo.min)
+    if sparse_head_indices is None:
+        return masked
+    out = attn_scores.clone()
+    for head_idx in sparse_head_indices:
+        if 0 <= head_idx < out.shape[1]:
+            out[:, head_idx, :, :] = masked[:, head_idx, :, :]
+    return out
 
 
 def _patched_eager_attention_forward(
@@ -1216,7 +1473,9 @@ def _patched_eager_attention_forward(
         )
         if shared_mask is not None:
             attn_weights = apply_shared_sparse_mask_to_attention_scores(
-                attn_weights, shared_mask.to(attn_weights.device)
+                attn_weights,
+                shared_mask.to(attn_weights.device),
+                sparse_head_indices=controller.sparse_head_indices,
             )
 
     attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query.dtype)
@@ -1431,6 +1690,7 @@ def save_results(
         "mask_method": args.mask_method,
         "top_p": args.top_p,
         "top_k": args.top_k,
+        "top_ratio": args.top_ratio,
         "local_window": args.local_window,
         "apply_prefill": args.apply_prefill,
         "apply_decode": args.apply_decode,
@@ -1519,11 +1779,12 @@ def _chunked_prefill_past_key_values(
     *,
     analysis_seq_len: int,
     chunk_size: int,
-) -> Any:
-    """Memory-efficient prefill; returns past_key_values only (no attentions)."""
+) -> Tuple[Any, torch.Tensor]:
+    """Memory-efficient prefill; returns KV cache and final-position logits."""
     seq_len = input_ids.shape[1]
     device = input_ids.device
     past_key_values = None
+    last_logits = None
     use_sparse = controller is not None and controller.apply_prefill
     num_heads = int(getattr(model.config, "num_attention_heads", 28))
     max_attn_bytes = resolve_max_attn_score_bytes(seq_len)
@@ -1564,13 +1825,16 @@ def _chunked_prefill_past_key_values(
             output_attentions=False,
         )
         past_key_values = out.past_key_values
+        last_logits = out.logits[:, -1, :].detach()
         del out
         if device.type == "cuda":
             free_cuda_cache()
         start = end
 
     set_attention_forward_context(None)
-    return past_key_values
+    if last_logits is None:
+        raise RuntimeError("chunked prefill did not produce logits")
+    return past_key_values, last_logits
 
 
 @torch.inference_mode()
@@ -1685,6 +1949,7 @@ def _decode_loop(
     temperature: float,
     controller: Optional[SharedMaskAttentionController],
     analysis_seq_len: int,
+    prefill_logits: Optional[torch.Tensor] = None,
 ) -> Dict[str, Any]:
     """Token-by-token decode with optional sparse mask on decode stage."""
     device = input_ids.device
@@ -1694,7 +1959,31 @@ def _decode_loop(
     new_token_ids: List[int] = []
     eos_id = tokenizer.eos_token_id
 
-    for _ in range(max_new_tokens):
+    if prefill_logits is not None and max_new_tokens > 0:
+        if do_sample:
+            probs = F.softmax(prefill_logits / temperature, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)
+        else:
+            next_token = prefill_logits.argmax(dim=-1, keepdim=True)
+
+        new_token_ids.append(int(next_token.item()))
+        generated = torch.cat([generated, next_token], dim=1)
+        attn_mask = torch.cat(
+            [attn_mask, torch.ones((1, 1), device=device, dtype=attn_mask.dtype)],
+            dim=1,
+        )
+        if eos_id is not None and next_token.item() == eos_id:
+            set_attention_forward_context(None)
+            new_ids_tensor = torch.tensor(new_token_ids, dtype=torch.long)
+            text = tokenizer.decode(new_ids_tensor, skip_special_tokens=True)
+            return {
+                "new_token_ids": new_token_ids,
+                "generated_text": text,
+                "full_decoded": tokenizer.decode(generated[0], skip_special_tokens=True),
+                "past_key_values": past_key_values,
+            }
+
+    for _ in range(max_new_tokens - len(new_token_ids)):
         if controller is not None and controller.apply_decode:
             set_attention_forward_context(
                 AttentionForwardContext(
@@ -1777,7 +2066,7 @@ def generate_new_tokens(
 
     try:
         if input_len > prefill_chunk_size or input_len > 32768:
-            past_key_values = _chunked_prefill_past_key_values(
+            past_key_values, prefill_logits = _chunked_prefill_past_key_values(
                 model,
                 input_ids,
                 attention_mask,
@@ -1805,6 +2094,7 @@ def generate_new_tokens(
                 output_attentions=False,
             )
             past_key_values = out.past_key_values
+            prefill_logits = out.logits[:, -1, :].detach()
             del out
 
         free_cuda_cache()
@@ -1819,6 +2109,7 @@ def generate_new_tokens(
             temperature=temperature,
             controller=controller,
             analysis_seq_len=analysis_seq_len,
+            prefill_logits=prefill_logits,
         )
         del result["past_key_values"]
         free_cuda_cache()
@@ -1848,6 +2139,8 @@ def make_mode_controller(
     apply_decode: bool,
     last_q: int,
     analysis_seq_len: int,
+    sparse_head_indices: Optional[List[int]] = None,
+    debug_layers: Optional[set] = None,
 ) -> Optional[SharedMaskAttentionController]:
     if not apply_prefill and not apply_decode:
         return None
@@ -1857,6 +2150,8 @@ def make_mode_controller(
         apply_decode=apply_decode,
         last_q=last_q,
         analysis_seq_len=analysis_seq_len,
+        sparse_head_indices=sparse_head_indices,
+        debug_layers=debug_layers,
     )
 
 
@@ -1888,6 +2183,7 @@ def generate_new_tokens_from_past(
     do_sample: bool,
     temperature: float,
     analysis_seq_len: int,
+    prefill_logits: Optional[torch.Tensor] = None,
 ) -> Dict[str, Any]:
     """
     Decode-only generation starting from an existing KV cache.
@@ -1911,6 +2207,7 @@ def generate_new_tokens_from_past(
             temperature=temperature,
             controller=controller,
             analysis_seq_len=analysis_seq_len,
+            prefill_logits=prefill_logits,
         )
         # Drop KV cache from return payload (keeps parity with generate_new_tokens()).
         del result["past_key_values"]
@@ -1944,6 +2241,8 @@ def evaluate_mode_combo(
         apply_decode=spec["apply_decode"],
         last_q=last_q,
         analysis_seq_len=seq_len,
+        sparse_head_indices=getattr(args, "resolved_sparse_head_indices", None),
+        debug_layers=getattr(args, "debug_layers", None),
     )
     ppl = {"loss": float("nan"), "perplexity": float("nan"), "num_tokens": 0}
     if args.eval_compute_ppl:
@@ -2077,6 +2376,77 @@ def merge_task_eval_results(
     return merged
 
 
+def _split_ff_reference_roots(spec: Optional[str]) -> List[Path]:
+    if spec is None or str(spec).strip() == "":
+        return []
+    return [
+        Path(part.strip()).expanduser()
+        for part in str(spec).split(",")
+        if part.strip()
+    ]
+
+
+def _iter_task_eval_jsons(root: Path) -> List[Path]:
+    if root.is_file():
+        return [root]
+    roots = [root]
+    if root.name not in {"task_eval", "eval"}:
+        roots.extend([root / "task_eval", root / "eval"])
+    paths: List[Path] = []
+    for candidate_root in roots:
+        if candidate_root.is_dir():
+            paths.extend(sorted(candidate_root.glob("sample_*/task_eval.json")))
+    return paths
+
+
+def _build_ff_reference_index(args: argparse.Namespace) -> Dict[str, Dict[str, Any]]:
+    cached = getattr(args, "_ff_reference_index", None)
+    if cached is not None:
+        return cached
+
+    index: Dict[str, Dict[str, Any]] = {}
+    for root in _split_ff_reference_roots(getattr(args, "ff_reference_roots", None)):
+        loaded = 0
+        for path in _iter_task_eval_jsons(root):
+            try:
+                result = ensure_modes_from_legacy(
+                    json.loads(path.read_text(encoding="utf-8"))
+                )
+            except Exception as exc:
+                logger.warning("Skipping invalid ff reference %s: %s", path, exc)
+                continue
+            sample_id = str(result.get("sample_id", ""))
+            mode = result.get("modes", {}).get("prefill_full_decode_full")
+            if sample_id and mode:
+                index[sample_id] = mode
+                loaded += 1
+        logger.info("Loaded %d ff reference modes from %s", loaded, root)
+
+    setattr(args, "_ff_reference_index", index)
+    return index
+
+
+def load_ff_reference_mode(
+    args: argparse.Namespace,
+    sample: Dict[str, Any],
+    *,
+    gold_answer: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    sample_id = str(sample.get("_id", ""))
+    if not sample_id:
+        return None
+    mode = _build_ff_reference_index(args).get(sample_id)
+    if mode is None:
+        return None
+    reused = json.loads(json.dumps(mode))
+    reused["reused_from_ff_reference"] = True
+    if gold_answer is not None:
+        gen = reused.get("generation", {})
+        if gen.get("correct") is None and gen.get("answer") is not None:
+            gen["correct"] = gen.get("answer") == gold_answer
+    return reused
+
+
 def compare_generation_outputs(
     full_result: Dict[str, Any],
     sparse_result: Dict[str, Any],
@@ -2129,6 +2499,8 @@ def run_task_eval_for_sample(
     args: argparse.Namespace,
     input_ids: Optional[torch.Tensor] = None,
     attention_mask: Optional[torch.Tensor] = None,
+    sparse_head_indices: Optional[List[int]] = None,
+    debug_layers: Optional[set] = None,
 ) -> Dict[str, Any]:
     device = next(model.parameters()).device
     if input_ids is None or attention_mask is None:
@@ -2139,6 +2511,12 @@ def run_task_eval_for_sample(
     gold = str(sample.get("answer", "")).strip().upper() or None
 
     modes: Dict[str, Dict[str, Any]] = {}
+    ff_key = EVAL_MODE_COMBO_SPECS["ff"]["key"]
+    if "ff" in mode_combos:
+        ff_reference = load_ff_reference_mode(args, sample, gold_answer=gold)
+        if ff_reference is not None:
+            modes[ff_key] = ff_reference
+            logger.info("  reused ff reference for sample_id=%s", sample.get("_id"))
 
     # Speed optimization (semantics-preserving):
     # - Prefill_full KV is identical for ff and fs -> compute once, reuse for both decodes
@@ -2146,6 +2524,8 @@ def run_task_eval_for_sample(
     # - PPL depends only on prefill, not decode -> compute once per prefill kind and share
     combos_by_prefill: Dict[bool, List[str]] = {False: [], True: []}
     for combo in mode_combos:
+        if combo == "ff" and ff_key in modes:
+            continue
         combos_by_prefill[bool(EVAL_MODE_COMBO_SPECS[combo]["apply_prefill"])].append(combo)
 
     for apply_prefill in (False, True):
@@ -2160,6 +2540,8 @@ def run_task_eval_for_sample(
             apply_decode=False,
             last_q=last_q,
             analysis_seq_len=seq_len,
+            sparse_head_indices=sparse_head_indices,
+            debug_layers=debug_layers,
         )
 
         ppl = {"loss": float("nan"), "perplexity": float("nan"), "num_tokens": 0}
@@ -2178,7 +2560,7 @@ def run_task_eval_for_sample(
         if sparse_prefill_patched:
             patch_model_attention(model, prefill_controller)
         try:
-            past_key_values = _chunked_prefill_past_key_values(
+            past_key_values, prefill_logits = _chunked_prefill_past_key_values(
                 model,
                 input_ids,
                 attention_mask,
@@ -2203,6 +2585,8 @@ def run_task_eval_for_sample(
                 apply_decode=apply_decode,
                 last_q=last_q,
                 analysis_seq_len=seq_len,
+                sparse_head_indices=sparse_head_indices,
+                debug_layers=debug_layers,
             )
 
             gen = generate_new_tokens_from_past(
@@ -2216,6 +2600,7 @@ def run_task_eval_for_sample(
                 do_sample=args.do_sample,
                 temperature=args.temperature,
                 analysis_seq_len=seq_len,
+                prefill_logits=prefill_logits,
             )
             free_cuda_cache()
 
@@ -2347,6 +2732,8 @@ def run_task_eval_with_fixed_heads(
         args=args,
         input_ids=input_ids,
         attention_mask=attention_mask,
+        sparse_head_indices=getattr(args, "resolved_sparse_head_indices", None),
+        debug_layers=getattr(args, "debug_layers", None),
     )
     if args.save_masks:
         masks_to_save = {str(k): v.cpu() for k, v in layer_to_mask.items()}
@@ -2401,6 +2788,8 @@ def run_task_eval_with_fixed_heads(
 def aggregate_global_representative_heads(
     selection_results: List[Dict[str, Any]],
     num_layers: int,
+    *,
+    representative_selection: str = "coverage",
 ) -> Dict[str, Any]:
     """
     Confirm per-layer representative heads from multiple head-selection samples.
@@ -2452,6 +2841,7 @@ def aggregate_global_representative_heads(
 
     return {
         "representative_heads": global_heads,
+        "representative_selection": representative_selection,
         "num_selection_samples": len(selection_results),
         "selection_sample_ids": [r["sample_id"] for r in selection_results],
         "per_layer_vote_detail": vote_detail,
@@ -2483,6 +2873,9 @@ def summarize_task_eval(output_dir: Path, eval_num_samples: int) -> Dict[str, An
         for e in entries:
             obj: Any = e
             for k in key_path:
+                if not isinstance(obj, dict) or k not in obj:
+                    obj = None
+                    break
                 obj = obj[k]
             if obj is not None and math.isfinite(float(obj)):
                 vals.append(float(obj))
@@ -2534,12 +2927,14 @@ def summarize_task_eval(output_dir: Path, eval_num_samples: int) -> Dict[str, An
     full_correct = [
         e["generation"]["full_correct"]
         for e in entries
-        if e.get("generation", {}).get("full_correct") is not None
+        if isinstance(e.get("generation"), dict)
+        and e.get("generation", {}).get("full_correct") is not None
     ]
     sparse_correct = [
         e["generation"]["sparse_correct"]
         for e in entries
-        if e.get("generation", {}).get("sparse_correct") is not None
+        if isinstance(e.get("generation"), dict)
+        and e.get("generation", {}).get("sparse_correct") is not None
     ]
 
     summary = {
@@ -2795,6 +3190,7 @@ def process_sample(
     )
 
     num_layers = attentions.shape[0]
+    num_heads = attentions.shape[1]
     representative_heads: Dict[int, int] = {}
     coverage_scores: Dict[int, Dict[str, Any]] = {}
     similarity_matrices: Dict[int, torch.Tensor] = {}
@@ -2807,7 +3203,14 @@ def process_sample(
             similarity_mask_builder,
             query_abs_positions=query_abs_positions,
         )
-        rep_head, score_per_head = select_representative_head(sim)
+        rep_head, score_per_head = select_representative_head_by_mode(
+            sim,
+            mode=args.representative_selection,
+            layer_idx=layer_idx,
+            num_heads=num_heads,
+            num_layers=num_layers,
+            seed=args.seed,
+        )
 
         representative_heads[layer_idx] = rep_head
         similarity_matrices[layer_idx] = sim
@@ -2957,6 +3360,14 @@ def process_sample(
 
 def main() -> None:
     args = parse_args()
+    baseline_cfg: Optional[Dict[str, Any]] = None
+    if args.baseline_id:
+        baseline_cfg = apply_baseline_config(args)
+
+    args.debug_layers = parse_debug_layers(args.debug_layers)
+    if args.debug_layers is not None:
+        logger.info("debug_layers=%s (sparse only on these layers)", sorted(args.debug_layers))
+
     torch.manual_seed(args.seed)
 
     if args.run_task_eval and not args.skip_head_selection:
@@ -2984,6 +3395,14 @@ def main() -> None:
 
     logger.info("Loading model: %s", args.model_name_or_path)
     model, tokenizer = load_model_and_tokenizer(args)
+    args.resolved_sparse_head_indices = parse_sparse_head_indices(
+        args.sparse_head_indices, int(model.config.num_attention_heads)
+    )
+    if args.resolved_sparse_head_indices is not None:
+        logger.info(
+            "Sparse head routing (DuoAttention proxy): heads=%s",
+            args.resolved_sparse_head_indices,
+        )
 
     samples = load_longbench_v2_samples(args)
     mask_builder = get_mask_builder(args)
@@ -3063,7 +3482,9 @@ def main() -> None:
 
             num_layers = len(selection_results[0]["representative_heads"])
             global_heads_meta = aggregate_global_representative_heads(
-                selection_results, num_layers
+                selection_results,
+                num_layers,
+                representative_selection=args.representative_selection,
             )
             global_heads_path = output_dir / "global_representative_heads.json"
             serializable = {
@@ -3135,6 +3556,10 @@ def main() -> None:
 
         if args.filter_after_run:
             filter_results_after_run(output_dir, args)
+
+    if args.baseline_id:
+        manifest_path = write_experiment_manifest(output_dir, args, baseline_cfg)
+        logger.info("Wrote experiment manifest: %s", manifest_path)
 
     logger.info("Done. Outputs: %s", output_dir)
 

@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "baselines": {
+    "random_single_cluster": {
+      "method_name": "Random Single-Cluster",
+      "paper_source": "Internal ablation baseline (not from literature)",
+      "approximation_notes": "Single shared mask per layer from a uniformly random representative head (seed-controlled) instead of coverage-based selection. Mask built with top_p mass retention on the chosen head attention map.",
+      "representative_selection": "random",
+      "mask_method": "top_p",
+      "top_p": 0.85,
+      "top_k": 128,
+      "local_window": 256,
+      "sparse_head_indices": null
+    },
+    "moa": {
+      "method_name": "MoA",
+      "paper_source": "Mixture-of-Attention / routed top-k head selection (routed sparse attention literature)",
+      "approximation_notes": "Proxy: per-layer shared mask from coverage-selected representative head, but mask retention uses top_k (fixed token budget per query row) instead of top_p. Does not implement true per-head MoA routing.",
+      "representative_selection": "coverage",
+      "mask_method": "top_k",
+      "top_p": 0.85,
+      "top_k": 128,
+      "local_window": 256,
+      "sparse_head_indices": null
+    },
+    "minference": {
+      "method_name": "MInference",
+      "paper_source": "Jiang et al., MInference 1.0: Accelerating Pre-filling for Long-Context LLMs via Dynamic Sparse Attention (Microsoft, 2024)",
+      "approximation_notes": "Proxy: top_p_local mask (local band + cumulative mass) mimics MInference pattern-aware retention (A-shape / vertical+slash families) without full pattern classification per head.",
+      "representative_selection": "coverage",
+      "mask_method": "top_p_local",
+      "top_p": 0.85,
+      "top_k": 128,
+      "local_window": 256,
+      "sparse_head_indices": null
+    },
+    "flexprefill": {
+      "method_name": "FlexPrefill",
+      "paper_source": "FlexPrefill: query/context-aware adaptive sparse prefill (adaptive top-p retention literature)",
+      "approximation_notes": "Proxy: adaptive_top_p mask builder — top_p scales with query distance to sequence end (higher retention near query, lower for distant context). Does not implement full FlexPrefill block scheduling.",
+      "representative_selection": "coverage",
+      "mask_method": "adaptive_top_p",
+      "top_p": 0.85,
+      "top_k": 128,
+      "local_window": 256,
+      "adaptive_top_p_min": 0.65,
+      "sparse_head_indices": null
+    },
+    "duoattention": {
+      "method_name": "DuoAttention",
+      "paper_source": "DuoAttention: retrieval heads vs streaming heads for long-context LLMs",
+      "approximation_notes": "Proxy: even-indexed heads receive sparse shared mask (streaming); odd-indexed heads remain full attention (retrieval). Representative head still chosen by coverage for mask construction.",
+      "representative_selection": "coverage",
+      "mask_method": "top_p",
+      "top_p": 0.85,
+      "top_k": 128,
+      "local_window": 256,
+      "sparse_head_indices": "even"
+    },
+    "dam": {
+      "method_name": "DAM",
+      "paper_source": "Dynamic Attention Mask (DAM) — per-sample attention-map-derived sparse mask",
+      "approximation_notes": "Proxy: standard pipeline — per-sample dynamic mask from full-attention map of coverage-selected representative head with top_p=0.85. Matches native DAM-style map-to-mask without learned mask predictor.",
+      "representative_selection": "coverage",
+      "mask_method": "top_p",
+      "top_p": 0.85,
+      "top_k": 128,
+      "local_window": 256,
+      "sparse_head_indices": null
+    },
+    "survey_heads": {
+      "method_name": "Attention Heads Survey",
+      "paper_source": "Attention head role/function survey literature (functional head taxonomy baselines)",
+      "approximation_notes": "Proxy: fixed role-based representative head per layer — early layers use head 0 (sink-like), middle layers use mid head (pattern), late layers use last head (local/recency). No data-driven selection.",
+      "representative_selection": "survey_fixed",
+      "mask_method": "top_p",
+      "top_p": 0.85,
+      "top_k": 128,
+      "local_window": 256,
+      "sparse_head_indices": null
+    }
+  }
+}

@@ -51,6 +51,7 @@ from experiments.run_shared_layer_mask_experiment import (
     get_mask_builder,
     legacy_generation_from_modes,
     load_longbench_v2_samples,
+    load_ff_reference_mode,
     load_model_and_tokenizer,
     merge_task_eval_results,
     parse_eval_mode_combos,
@@ -132,6 +133,16 @@ def parse_args() -> argparse.Namespace:
         "--eval_mode_combos",
         type=str,
         default="ff,sf,fs,ss",
+    )
+    p.add_argument(
+        "--ff_reference_roots",
+        type=str,
+        default=None,
+        help=(
+            "Optional comma-separated output roots containing task_eval.json files. "
+            "When ff is requested, prefill_full_decode_full is loaded by sample_id "
+            "from these roots instead of recomputing dense full-attention generation."
+        ),
     )
     p.add_argument("--eval_max_new_tokens", type=int, default=8)
     p.add_argument("--eval_compute_ppl", type=str_to_bool, default=True)
@@ -700,9 +711,17 @@ def run_cluster_task_eval_for_sample(
     gold = str(sample.get("answer", "")).strip().upper() or None
 
     modes: Dict[str, Dict[str, Any]] = {}
+    ff_key = EVAL_MODE_COMBO_SPECS["ff"]["key"]
+    if "ff" in mode_combos:
+        ff_reference = load_ff_reference_mode(args, sample, gold_answer=gold)
+        if ff_reference is not None:
+            modes[ff_key] = ff_reference
+            logger.info("  reused ff reference for sample_id=%s", sample.get("_id"))
 
     combos_by_prefill: Dict[bool, List[str]] = {False: [], True: []}
     for combo in mode_combos:
+        if combo == "ff" and ff_key in modes:
+            continue
         combos_by_prefill[bool(EVAL_MODE_COMBO_SPECS[combo]["apply_prefill"])].append(combo)
 
     for apply_prefill in (False, True):
