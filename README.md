@@ -99,4 +99,3 @@ bash -n experiments/run_comparison_sweep_32k.sh \
   experiments/run_random_single_cluster_500eval.sh
 ```
 
-Do not commit raw outputs or model/data artifacts.
