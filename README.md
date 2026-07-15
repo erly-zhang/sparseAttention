@@ -22,19 +22,6 @@ exploration scripts.
 - `experiments/SCRIPTS.md`
   - Detailed command reference for active scripts.
 
-## What Is Not Included
-
-The repository intentionally excludes large or machine-local artifacts:
-
-- model checkpoints
-- datasets
-- `experiments/outputs/`
-- logs
-- backup files
-- third-party cloned repositories such as MInference or FlexPrefill
-
-These paths are ignored by `.gitignore`.
-
 ## Evaluation Setup
 
 The canonical Stage-2 comparison uses:
