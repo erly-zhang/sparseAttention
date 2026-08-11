@@ -5,6 +5,11 @@ attention comparisons on Qwen2.5-7B. The repository is now focused on the
 current Stage-2 evaluation pipeline rather than the earlier attention-map
 exploration scripts.
 
+The latest code also includes SharePrefill-AE head grouping, token-compacted
+sparse attention, token-first AutoBlock routing, aligned ten-task InfiniteBench
+evaluation, and final-kernel token-pair sparsity profiling for FlexPrefill and
+MInference.
+
 ## What Is Included
 
 - `experiments/run_shared_layer_mask_experiment.py`
@@ -21,6 +26,36 @@ exploration scripts.
   - Builds the aligned LongBench-v2 split used by the current experiments.
 - `experiments/SCRIPTS.md`
   - Detailed command reference for active scripts.
+- `experiments/run_shareprefill_ae3_infinitebench.py`
+  - Canonical InfiniteBench runner for SharePrefill-AE Full, Compact,
+    HISA-style, and AutoBlock variants.
+- `experiments/token_compacted_sparse.py`
+  - Representative-head token routing, dynamic block projection, Triton
+    kernels, and sparsity accounting.
+- `experiments/baseline_sparsity.py`
+  - Final-kernel causal token-pair instrumentation for official baselines.
+- `experiments/aggregate_infinitebench_methods.py`
+  - Per-task and aggregate accuracy, latency, throughput, and sparsity report.
+
+## AutoBlock Visualizations
+
+- [`autoblock-mask-generation-en.html`](autoblock-mask-generation-en.html):
+  English interactive walkthrough.
+- [`autoblock-mask-generation-zh.html`](autoblock-mask-generation-zh.html):
+  Chinese interactive walkthrough.
+- [`block-sparse-token-compaction.html`](block-sparse-token-compaction.html):
+  block-first token-compaction explainer.
+- [`visualizations/block-sparse-explainer/index.html`](visualizations/block-sparse-explainer/index.html):
+  grouped sparse-attention explainer.
+
+These files are standalone and can be opened directly in a browser.
+
+## Final InfiniteBench Results
+
+`results/final_method_comparison.csv` and
+`results/final_method_comparison.json` contain the aligned ten-task comparison
+used by the final tables. Large datasets, model weights, checkpoints, logs,
+and raw experiment outputs remain excluded from version control.
 
 ## Evaluation Setup
 
@@ -98,4 +133,3 @@ bash -n experiments/run_comparison_sweep_32k.sh \
   experiments/run_full_longbench_128k_pipeline.sh \
   experiments/run_random_single_cluster_500eval.sh
 ```
-

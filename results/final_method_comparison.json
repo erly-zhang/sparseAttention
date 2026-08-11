@@ -1,0 +1,638 @@
+{
+  "benchmark": "InfiniteBench",
+  "sparsity_definition": "1 - sum(final-kernel causally valid selected token pairs) / sum(dense causal token pairs)",
+  "score_aggregation": {
+    "macro_task_score": "unweighted mean over 10 task scores",
+    "sample_weighted_score": "mean weighted by each task sample count"
+  },
+  "methods": [
+    {
+      "method": "FlexPrefill",
+      "root": "/home/ubuntu/work/experiments/outputs/infinitebench_baselines_full_generation_sparsity/flexprefill",
+      "validation": "passed/full",
+      "global": {
+        "tasks": 10,
+        "samples": 3493,
+        "macro_task_score": 0.26757212744240766,
+        "sample_weighted_score": 0.38076053716337954,
+        "avg_input_tokens": 120913.16976810765,
+        "avg_generated_tokens": 81.85542513598625,
+        "avg_prefill_latency_sec": 15.338102305545803,
+        "avg_decode_latency_sec": 4.853020747400968,
+        "avg_total_latency_sec": 20.191123052946768,
+        "samples_per_hour": 178.29617453966247,
+        "selected_blocks": 247166655473,
+        "causal_blocks": 1242437401072,
+        "global_block_sparsity": 0.8010630915813226,
+        "selected_token_pairs": 4026182501717264,
+        "causal_token_pairs": 20318983114266256,
+        "global_token_sparsity": 0.8018511812783375
+      },
+      "tasks": [
+        {
+          "task": "code_debug",
+          "count": 394,
+          "score": 0.10913705583756345,
+          "avg_prefill_latency_sec": 12.818114361913072,
+          "avg_decode_latency_sec": 6.73736610746488,
+          "avg_total_latency_sec": 19.555480469377954,
+          "global_block_sparsity": 0.8509710353302868,
+          "global_token_sparsity": 0.8519115320366879
+        },
+        {
+          "task": "kv_retrieval",
+          "count": 497,
+          "score": 0.0,
+          "avg_prefill_latency_sec": 16.78690228283766,
+          "avg_decode_latency_sec": 7.9986302955404405,
+          "avg_total_latency_sec": 24.785532578378092,
+          "global_block_sparsity": 0.8113647147137006,
+          "global_token_sparsity": 0.8121516353198226
+        },
+        {
+          "task": "longbook_choice_eng",
+          "count": 229,
+          "score": 0.1615720524017467,
+          "avg_prefill_latency_sec": 15.145585741334623,
+          "avg_decode_latency_sec": 2.087883907667107,
+          "avg_total_latency_sec": 17.233469649001712,
+          "global_block_sparsity": 0.8092709135361402,
+          "global_token_sparsity": 0.8100748058893932
+        },
+        {
+          "task": "longbook_qa_chn",
+          "count": 189,
+          "score": 0.0635165640857587,
+          "avg_prefill_latency_sec": 14.935980377035792,
+          "avg_decode_latency_sec": 2.2095248274376176,
+          "avg_total_latency_sec": 17.145505204473416,
+          "global_block_sparsity": 0.8164937073556475,
+          "global_token_sparsity": 0.8172748717688743
+        },
+        {
+          "task": "longbook_qa_eng",
+          "count": 351,
+          "score": 0.029765864408674066,
+          "avg_prefill_latency_sec": 14.88531921073719,
+          "avg_decode_latency_sec": 2.3438557199390915,
+          "avg_total_latency_sec": 17.229174930676272,
+          "global_block_sparsity": 0.8130346008977297,
+          "global_token_sparsity": 0.8138401389202584
+        },
+        {
+          "task": "longbook_sum_eng",
+          "count": 103,
+          "score": 0.08295249798089059,
+          "avg_prefill_latency_sec": 13.952271536521536,
+          "avg_decode_latency_sec": 61.692746851167755,
+          "avg_total_latency_sec": 75.64501838768929,
+          "global_block_sparsity": 0.8171455003397199,
+          "global_token_sparsity": 0.8179827136624298
+        },
+        {
+          "task": "longdialogue_qa_eng",
+          "count": 200,
+          "score": 0.065,
+          "avg_prefill_latency_sec": 13.24212555664063,
+          "avg_decode_latency_sec": 1.8586626697931712,
+          "avg_total_latency_sec": 15.100788226433798,
+          "global_block_sparsity": 0.8007432606381728,
+          "global_token_sparsity": 0.8016316828945156
+        },
+        {
+          "task": "math_find",
+          "count": 350,
+          "score": 0.29428571428571426,
+          "avg_prefill_latency_sec": 14.969080731026779,
+          "avg_decode_latency_sec": 0.3020808556467454,
+          "avg_total_latency_sec": 15.27116158667353,
+          "global_block_sparsity": 0.7942979712456538,
+          "global_token_sparsity": 0.7950965478452424
+        },
+        {
+          "task": "number_string",
+          "count": 590,
+          "score": 0.8711864406779661,
+          "avg_prefill_latency_sec": 16.396289769266435,
+          "avg_decode_latency_sec": 2.2650586187547255,
+          "avg_total_latency_sec": 18.661348388021146,
+          "global_block_sparsity": 0.7755839059115406,
+          "global_token_sparsity": 0.7762992105278408
+        },
+        {
+          "task": "passkey",
+          "count": 590,
+          "score": 0.9983050847457627,
+          "avg_prefill_latency_sec": 16.386574731859103,
+          "avg_decode_latency_sec": 0.7375299293833145,
+          "avg_total_latency_sec": 17.124104661242423,
+          "global_block_sparsity": 0.7778972515441904,
+          "global_token_sparsity": 0.7786031248303413
+        }
+      ]
+    },
+    {
+      "method": "MInference",
+      "root": "/home/ubuntu/work/experiments/outputs/infinitebench_baselines_full_generation_sparsity/minference",
+      "validation": "passed/full",
+      "global": {
+        "tasks": 10,
+        "samples": 3493,
+        "macro_task_score": 0.20659553625868235,
+        "sample_weighted_score": 0.2803642852692972,
+        "avg_input_tokens": 120913.16976810765,
+        "avg_generated_tokens": 90.51044947036931,
+        "avg_prefill_latency_sec": 17.447833299620992,
+        "avg_decode_latency_sec": 19.11781325831684,
+        "avg_total_latency_sec": 36.565646557937846,
+        "samples_per_hour": 98.45306561982547,
+        "selected_blocks": 941057523397,
+        "causal_blocks": 4964691648672,
+        "global_block_sparsity": 0.8104499554068534,
+        "selected_token_pairs": 3993771577089422,
+        "causal_token_pairs": 20318983114266256,
+        "global_token_sparsity": 0.8034462869214485
+      },
+      "tasks": [
+        {
+          "task": "code_debug",
+          "count": 394,
+          "score": 0.10406091370558376,
+          "avg_prefill_latency_sec": 15.250653885429886,
+          "avg_decode_latency_sec": 23.377922505452364,
+          "avg_total_latency_sec": 38.62857639088223,
+          "global_block_sparsity": 0.8168860102217956,
+          "global_token_sparsity": 0.8091298781911032
+        },
+        {
+          "task": "kv_retrieval",
+          "count": 497,
+          "score": 0.0,
+          "avg_prefill_latency_sec": 19.325040972396874,
+          "avg_decode_latency_sec": 29.393854886756305,
+          "avg_total_latency_sec": 48.718895859153186,
+          "global_block_sparsity": 0.8108474535579958,
+          "global_token_sparsity": 0.803185637439548
+        },
+        {
+          "task": "longbook_choice_eng",
+          "count": 229,
+          "score": 0.22707423580786026,
+          "avg_prefill_latency_sec": 17.003157499488257,
+          "avg_decode_latency_sec": 7.8412694988424665,
+          "avg_total_latency_sec": 24.844426998330736,
+          "global_block_sparsity": 0.8221068169608161,
+          "global_token_sparsity": 0.8142025798705288
+        },
+        {
+          "task": "longbook_qa_chn",
+          "count": 189,
+          "score": 0.07552606928785524,
+          "avg_prefill_latency_sec": 16.86860897584945,
+          "avg_decode_latency_sec": 8.558263623891776,
+          "avg_total_latency_sec": 25.42687259974123,
+          "global_block_sparsity": 0.8333769981900183,
+          "global_token_sparsity": 0.8259561774574886
+        },
+        {
+          "task": "longbook_qa_eng",
+          "count": 351,
+          "score": 0.030574418448420616,
+          "avg_prefill_latency_sec": 17.25170335870726,
+          "avg_decode_latency_sec": 8.32662822476065,
+          "avg_total_latency_sec": 25.578331583467918,
+          "global_block_sparsity": 0.8202921163408978,
+          "global_token_sparsity": 0.8131471614768426
+        },
+        {
+          "task": "longbook_sum_eng",
+          "count": 103,
+          "score": 0.08064466480441572,
+          "avg_prefill_latency_sec": 16.14245705969356,
+          "avg_decode_latency_sec": 214.32736309036468,
+          "avg_total_latency_sec": 230.46982015005835,
+          "global_block_sparsity": 0.8204072642153359,
+          "global_token_sparsity": 0.8135063144289806
+        },
+        {
+          "task": "longdialogue_qa_eng",
+          "count": 200,
+          "score": 0.095,
+          "avg_prefill_latency_sec": 15.350652963867185,
+          "avg_decode_latency_sec": 6.194970642371908,
+          "avg_total_latency_sec": 21.545623606239097,
+          "global_block_sparsity": 0.7875763758175705,
+          "global_token_sparsity": 0.7813415285041977
+        },
+        {
+          "task": "math_find",
+          "count": 350,
+          "score": 0.09714285714285714,
+          "avg_prefill_latency_sec": 16.773226989397326,
+          "avg_decode_latency_sec": 0.8419427535742046,
+          "avg_total_latency_sec": 17.615169742971524,
+          "global_block_sparsity": 0.8202398924709945,
+          "global_token_sparsity": 0.8136540150549115
+        },
+        {
+          "task": "number_string",
+          "count": 590,
+          "score": 0.41694915254237286,
+          "avg_prefill_latency_sec": 18.26355513771184,
+          "avg_decode_latency_sec": 19.547587269230895,
+          "avg_total_latency_sec": 37.81114240694274,
+          "global_block_sparsity": 0.8001275712156277,
+          "global_token_sparsity": 0.793639987180286
+        },
+        {
+          "task": "passkey",
+          "count": 590,
+          "score": 0.9389830508474576,
+          "avg_prefill_latency_sec": 18.331881408898276,
+          "avg_decode_latency_sec": 2.5094853203627325,
+          "avg_total_latency_sec": 20.841366729261036,
+          "global_block_sparsity": 0.7992260383363923,
+          "global_token_sparsity": 0.7928228236596837
+        }
+      ]
+    },
+    {
+      "method": "AutoBlock",
+      "root": "/home/ubuntu/work/experiments/outputs/infinitebench_shareprefill_ae3_token_block_auto_retrieval/shareprefill_ae3_token_block_auto",
+      "validation": "passed/full",
+      "global": {
+        "tasks": 10,
+        "samples": 3493,
+        "macro_task_score": 0.27648357651372957,
+        "sample_weighted_score": 0.39039797572476653,
+        "avg_input_tokens": 120913.16976810765,
+        "avg_generated_tokens": 78.86258230747208,
+        "avg_prefill_latency_sec": 17.893361101248257,
+        "avg_decode_latency_sec": 4.676094039045017,
+        "avg_total_latency_sec": 22.56945514029327,
+        "samples_per_hour": 159.50761671569626,
+        "selected_blocks": 323610748778,
+        "causal_blocks": 2655416834656,
+        "global_block_sparsity": 0.8781318456091197,
+        "selected_token_pairs": 2601062818999760,
+        "causal_token_pairs": 20318983114266256,
+        "global_token_sparsity": 0.8719885338566222
+      },
+      "tasks": [
+        {
+          "task": "code_debug",
+          "count": 394,
+          "score": 0.11928934010152284,
+          "avg_prefill_latency_sec": 15.622324340200667,
+          "avg_decode_latency_sec": 6.747698782008518,
+          "avg_total_latency_sec": 22.37002312220919,
+          "global_block_sparsity": 0.8704972138694067,
+          "global_token_sparsity": 0.8610883964562968
+        },
+        {
+          "task": "kv_retrieval",
+          "count": 497,
+          "score": 0.002012072434607646,
+          "avg_prefill_latency_sec": 19.677691363021875,
+          "avg_decode_latency_sec": 8.008298969116243,
+          "avg_total_latency_sec": 27.685990332138125,
+          "global_block_sparsity": 0.8856667339263633,
+          "global_token_sparsity": 0.8797013487746306
+        },
+        {
+          "task": "longbook_choice_eng",
+          "count": 229,
+          "score": 0.24890829694323144,
+          "avg_prefill_latency_sec": 17.799756098185057,
+          "avg_decode_latency_sec": 2.155536989935377,
+          "avg_total_latency_sec": 19.95529308812042,
+          "global_block_sparsity": 0.8800218602253858,
+          "global_token_sparsity": 0.8716748128120955
+        },
+        {
+          "task": "longbook_qa_chn",
+          "count": 189,
+          "score": 0.055729533089272504,
+          "avg_prefill_latency_sec": 17.80371389560598,
+          "avg_decode_latency_sec": 2.166084231003064,
+          "avg_total_latency_sec": 19.96979812660905,
+          "global_block_sparsity": 0.8847792869734384,
+          "global_token_sparsity": 0.876922907369749
+        },
+        {
+          "task": "longbook_qa_eng",
+          "count": 351,
+          "score": 0.023950236511287477,
+          "avg_prefill_latency_sec": 17.739693445624127,
+          "avg_decode_latency_sec": 2.330989885511979,
+          "avg_total_latency_sec": 20.07068333113609,
+          "global_block_sparsity": 0.8803602612036194,
+          "global_token_sparsity": 0.8719209763872685
+        },
+        {
+          "task": "longbook_sum_eng",
+          "count": 103,
+          "score": 0.07495839259490422,
+          "avg_prefill_latency_sec": 16.544183470494538,
+          "avg_decode_latency_sec": 58.30556757359849,
+          "avg_total_latency_sec": 74.84975104409301,
+          "global_block_sparsity": 0.8758137189651017,
+          "global_token_sparsity": 0.8666361965679436
+        },
+        {
+          "task": "longdialogue_qa_eng",
+          "count": 200,
+          "score": 0.075,
+          "avg_prefill_latency_sec": 15.378637895507811,
+          "avg_decode_latency_sec": 1.8037271315357493,
+          "avg_total_latency_sec": 17.18236502704356,
+          "global_block_sparsity": 0.8640707833221797,
+          "global_token_sparsity": 0.8540369275329223
+        },
+        {
+          "task": "math_find",
+          "count": 350,
+          "score": 0.25142857142857145,
+          "avg_prefill_latency_sec": 17.190300301339303,
+          "avg_decode_latency_sec": 0.519218191023908,
+          "avg_total_latency_sec": 17.709518492363195,
+          "global_block_sparsity": 0.873523431046956,
+          "global_token_sparsity": 0.8669207579692022
+        },
+        {
+          "task": "number_string",
+          "count": 590,
+          "score": 0.9203389830508475,
+          "avg_prefill_latency_sec": 18.6145093584481,
+          "avg_decode_latency_sec": 1.716813460214646,
+          "avg_total_latency_sec": 20.331322818662738,
+          "global_block_sparsity": 0.8784307845363665,
+          "global_token_sparsity": 0.8745360628962302
+        },
+        {
+          "task": "passkey",
+          "count": 590,
+          "score": 0.9932203389830508,
+          "avg_prefill_latency_sec": 18.847253141551892,
+          "avg_decode_latency_sec": 0.6997085350505498,
+          "avg_total_latency_sec": 19.546961676602457,
+          "global_block_sparsity": 0.8783214978730002,
+          "global_token_sparsity": 0.8745274122523504
+        }
+      ]
+    },
+    {
+      "method": "AE3-Compact",
+      "root": "/home/ubuntu/work/experiments/outputs/infinitebench_shareprefill_ae3_compact_global_sparsity/shareprefill_ae3_compact",
+      "validation": "passed/full",
+      "global": {
+        "tasks": 10,
+        "samples": 3493,
+        "macro_task_score": 0.06105262515597841,
+        "sample_weighted_score": 0.046584183956733534,
+        "avg_input_tokens": 120913.16976810765,
+        "avg_generated_tokens": 73.07386200973376,
+        "avg_prefill_latency_sec": 16.824052043190733,
+        "avg_decode_latency_sec": 4.298287517413963,
+        "avg_total_latency_sec": 21.122339560604697,
+        "samples_per_hour": 170.43566550337846,
+        "selected_blocks": 271830190992,
+        "causal_blocks": 1242437401072,
+        "global_block_sparsity": 0.78121216348006,
+        "selected_token_pairs": 2336272306256890,
+        "causal_token_pairs": 20318983114266256,
+        "global_token_sparsity": 0.8850202151791465
+      },
+      "tasks": [
+        {
+          "task": "code_debug",
+          "count": 394,
+          "score": 0.07868020304568528,
+          "avg_prefill_latency_sec": 13.649084185140383,
+          "avg_decode_latency_sec": 6.724286050590944,
+          "avg_total_latency_sec": 20.37337023573133,
+          "global_block_sparsity": 0.8444150002638351,
+          "global_token_sparsity": 0.9278403313337668
+        },
+        {
+          "task": "kv_retrieval",
+          "count": 497,
+          "score": 0.0,
+          "avg_prefill_latency_sec": 19.93440705954478,
+          "avg_decode_latency_sec": 7.917875122217471,
+          "avg_total_latency_sec": 27.852282181762227,
+          "global_block_sparsity": 0.7175258013384999,
+          "global_token_sparsity": 0.8394380750400973
+        },
+        {
+          "task": "longbook_choice_eng",
+          "count": 229,
+          "score": 0.14847161572052403,
+          "avg_prefill_latency_sec": 16.436660753275103,
+          "avg_decode_latency_sec": 2.0748564069921116,
+          "avg_total_latency_sec": 18.51151716026722,
+          "global_block_sparsity": 0.790142590301607,
+          "global_token_sparsity": 0.8969271375059036
+        },
+        {
+          "task": "longbook_qa_chn",
+          "count": 189,
+          "score": 0.04836788585657388,
+          "avg_prefill_latency_sec": 16.426993702721973,
+          "avg_decode_latency_sec": 2.3150284884805346,
+          "avg_total_latency_sec": 18.74202219120251,
+          "global_block_sparsity": 0.7962291413306632,
+          "global_token_sparsity": 0.9004625886281952
+        },
+        {
+          "task": "longbook_qa_eng",
+          "count": 351,
+          "score": 0.025729638240839438,
+          "avg_prefill_latency_sec": 16.232724449396795,
+          "avg_decode_latency_sec": 2.3201596369625834,
+          "avg_total_latency_sec": 18.5528840863594,
+          "global_block_sparsity": 0.7911234776309983,
+          "global_token_sparsity": 0.8975513407524676
+        },
+        {
+          "task": "longbook_sum_eng",
+          "count": 103,
+          "score": 0.09267884574216642,
+          "avg_prefill_latency_sec": 15.127177013804612,
+          "avg_decode_latency_sec": 58.22667736261428,
+          "avg_total_latency_sec": 73.35385437641892,
+          "global_block_sparsity": 0.7891711774775457,
+          "global_token_sparsity": 0.8960966919960192
+        },
+        {
+          "task": "longdialogue_qa_eng",
+          "count": 200,
+          "score": 0.055,
+          "avg_prefill_latency_sec": 13.756952705078128,
+          "avg_decode_latency_sec": 1.8683776645377148,
+          "avg_total_latency_sec": 15.62533036961584,
+          "global_block_sparsity": 0.8076063736389703,
+          "global_token_sparsity": 0.9075083560069042
+        },
+        {
+          "task": "math_find",
+          "count": 350,
+          "score": 0.15142857142857144,
+          "avg_prefill_latency_sec": 16.959625337611616,
+          "avg_decode_latency_sec": 0.5409657785370054,
+          "avg_total_latency_sec": 17.500591116148613,
+          "global_block_sparsity": 0.7594329862340641,
+          "global_token_sparsity": 0.8574714033329701
+        },
+        {
+          "task": "number_string",
+          "count": 590,
+          "score": 0.00847457627118644,
+          "avg_prefill_latency_sec": 17.435136738612304,
+          "avg_decode_latency_sec": 0.14344253619647462,
+          "avg_total_latency_sec": 17.578579274808764,
+          "global_block_sparsity": 0.7902624154920087,
+          "global_token_sparsity": 0.8903409034834834
+        },
+        {
+          "task": "passkey",
+          "count": 590,
+          "score": 0.001694915254237288,
+          "avg_prefill_latency_sec": 17.59796879303494,
+          "avg_decode_latency_sec": 0.09714356687032244,
+          "avg_total_latency_sec": 17.69511235990528,
+          "global_block_sparsity": 0.7880028310391599,
+          "global_token_sparsity": 0.8904493946336685
+        }
+      ]
+    },
+    {
+      "method": "AE3-Full",
+      "root": "/home/ubuntu/work/experiments/outputs/infinitebench_benchmark_specific_comparison/shareprefill_ae3_full",
+      "validation": "passed/full",
+      "global": {
+        "tasks": 10,
+        "samples": 3493,
+        "macro_task_score": 0.17168545767258642,
+        "sample_weighted_score": 0.22449806286203342,
+        "avg_input_tokens": 120913.16976810765,
+        "avg_generated_tokens": 79.76180933295161,
+        "avg_prefill_latency_sec": 51.62233040019773,
+        "avg_decode_latency_sec": 4.722465869608999,
+        "avg_total_latency_sec": 56.344796269806714,
+        "samples_per_hour": 63.89232437298063,
+        "selected_blocks": 288637634995,
+        "causal_blocks": 1242437401072,
+        "global_block_sparsity": 0.7676843640203058,
+        "selected_token_pairs": null,
+        "causal_token_pairs": null,
+        "global_token_sparsity": null
+      },
+      "tasks": [
+        {
+          "task": "code_debug",
+          "count": 394,
+          "score": 0.05583756345177665,
+          "avg_prefill_latency_sec": 44.70868186369767,
+          "avg_decode_latency_sec": 6.4837686750005,
+          "avg_total_latency_sec": 51.192450538698154,
+          "global_block_sparsity": 0.8597625156613123,
+          "global_token_sparsity": null
+        },
+        {
+          "task": "kv_retrieval",
+          "count": 497,
+          "score": 0.004024144869215292,
+          "avg_prefill_latency_sec": 56.58909617077465,
+          "avg_decode_latency_sec": 7.956372118029877,
+          "avg_total_latency_sec": 64.54546828880453,
+          "global_block_sparsity": 0.7320084851581956,
+          "global_token_sparsity": null
+        },
+        {
+          "task": "longbook_choice_eng",
+          "count": 229,
+          "score": 0.26200873362445415,
+          "avg_prefill_latency_sec": 50.441184318709034,
+          "avg_decode_latency_sec": 2.077975414028434,
+          "avg_total_latency_sec": 52.51915973273749,
+          "global_block_sparsity": 0.8027906609971416,
+          "global_token_sparsity": null
+        },
+        {
+          "task": "longbook_qa_chn",
+          "count": 189,
+          "score": 0.057079562631555426,
+          "avg_prefill_latency_sec": 50.62883030547289,
+          "avg_decode_latency_sec": 2.1551895045328764,
+          "avg_total_latency_sec": 52.78401981000576,
+          "global_block_sparsity": 0.8104577492701512,
+          "global_token_sparsity": null
+        },
+        {
+          "task": "longbook_qa_eng",
+          "count": 351,
+          "score": 0.027246631183739923,
+          "avg_prefill_latency_sec": 50.30767471843842,
+          "avg_decode_latency_sec": 2.3246364878975556,
+          "avg_total_latency_sec": 52.63231120633595,
+          "global_block_sparsity": 0.8036509691106644,
+          "global_token_sparsity": null
+        },
+        {
+          "task": "longbook_sum_eng",
+          "count": 103,
+          "score": 0.0662148416915151,
+          "avg_prefill_latency_sec": 47.975135372421114,
+          "avg_decode_latency_sec": 62.691030459055085,
+          "avg_total_latency_sec": 110.66616583147619,
+          "global_block_sparsity": 0.8019168715139873,
+          "global_token_sparsity": null
+        },
+        {
+          "task": "longdialogue_qa_eng",
+          "count": 200,
+          "score": 0.055,
+          "avg_prefill_latency_sec": 44.46311033203128,
+          "avg_decode_latency_sec": 1.5612912881937127,
+          "avg_total_latency_sec": 46.024401620224964,
+          "global_block_sparsity": 0.8240438495260956,
+          "global_token_sparsity": null
+        },
+        {
+          "task": "math_find",
+          "count": 350,
+          "score": 0.1657142857142857,
+          "avg_prefill_latency_sec": 50.71009455357144,
+          "avg_decode_latency_sec": 0.5415429467429345,
+          "avg_total_latency_sec": 51.25163750031436,
+          "global_block_sparsity": 0.7418246095133496,
+          "global_token_sparsity": null
+        },
+        {
+          "task": "number_string",
+          "count": 590,
+          "score": 0.8050847457627118,
+          "avg_prefill_latency_sec": 54.16132243776484,
+          "avg_decode_latency_sec": 1.981419501455604,
+          "avg_total_latency_sec": 56.142741939220436,
+          "global_block_sparsity": 0.7343167247739667,
+          "global_token_sparsity": null
+        },
+        {
+          "task": "passkey",
+          "count": 590,
+          "score": 0.21864406779661016,
+          "avg_prefill_latency_sec": 54.67991581700212,
+          "avg_decode_latency_sec": 0.27034738368078887,
+          "avg_total_latency_sec": 54.950263200682905,
+          "global_block_sparsity": 0.7343941191314625,
+          "global_token_sparsity": null
+        }
+      ]
+    }
+  ],
+  "task_overrides": {
+    "AE3-Full/math_find": "/home/ubuntu/work/experiments/outputs/infinitebench_unified_math10_comparison/shareprefill_ae3_full/math_find"
+  }
+}

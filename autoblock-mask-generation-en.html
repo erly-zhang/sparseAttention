@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoBlock Mask Generation</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: light-dark(#f5f7f8, #111619);
+      --surface: light-dark(#ffffff, #192126);
+      --surface-2: light-dark(#edf1f3, #222c32);
+      --text: light-dark(#172026, #edf2f4);
+      --muted: light-dark(#64727b, #a8b4ba);
+      --border: light-dark(#cbd4d9, #3b4a52);
+      --grid: light-dark(#d9e0e4, #344149);
+      --query: light-dark(#168aad, #4db6d6);
+      --key: light-dark(#d65a31, #f08a67);
+      --selected: light-dark(#217a4b, #67c891);
+      --selected-soft: light-dark(#d9f1e3, #183d2a);
+      --probe-a: light-dark(#2468a2, #6aafe6);
+      --probe-b: light-dark(#d07620, #efa85e);
+      --probe-c: light-dark(#b5413e, #ef7c79);
+      --probe-d: light-dark(#5b7785, #99aeb8);
+      --sink: light-dark(#7653a6, #b59be0);
+      --local: light-dark(#a56d12, #e2b65d);
+      --future: light-dark(#e8ecee, #283239);
+      --shadow: 0 10px 30px rgb(26 43 52 / 8%);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-width: 320px; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    button, input, select { font: inherit; }
+    button, select {
+      min-height: 36px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+    }
+    button { padding: 6px 11px; cursor: pointer; }
+    button:hover { background: var(--surface-2); }
+    button:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--query) 38%, transparent);
+      outline-offset: 2px;
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 30px; line-height: 1.15; font-weight: 550; }
+    h2 { font-size: 17px; font-weight: 600; }
+    h3 { font-size: 14px; font-weight: 600; }
+    code {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: var(--surface-2);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+    .app { width: min(1280px, 100%); margin: 0 auto; padding: 22px; }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    .eyebrow { color: var(--muted); font-size: 12px; margin-bottom: 5px; text-transform: uppercase; }
+    .header-note { color: var(--muted); max-width: 480px; text-align: right; line-height: 1.55; }
+    .lang-switch { display: inline-flex; margin-top: 9px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .lang-switch a { padding: 5px 9px; color: var(--muted); font-size: 12px; text-decoration: none; background: #fff; }
+    .lang-switch a + a { border-left: 1px solid var(--border); }
+    .lang-switch a.active { color: #fff; background: var(--ink); }
+    .control-band {
+      display: grid;
+      grid-template-columns: minmax(260px, 1.5fr) repeat(2, minmax(130px, .6fr));
+      gap: 18px;
+      align-items: end;
+      padding: 14px 16px;
+      margin-bottom: 18px;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+    .control { display: grid; gap: 7px; }
+    .control-head { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+    input[type="range"] { width: 100%; accent-color: var(--query); }
+    select { width: 100%; padding: 0 9px; }
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      margin-bottom: 18px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--surface);
+    }
+    .pipeline button {
+      min-width: 0;
+      min-height: 58px;
+      border: 0;
+      border-right: 1px solid var(--border);
+      border-radius: 0;
+      padding: 8px 10px;
+      text-align: left;
+    }
+    .pipeline button:last-child { border-right: 0; }
+    .pipeline button[aria-pressed="true"] { background: var(--text); color: var(--surface); }
+    .step-num { display: block; opacity: .62; font-size: 11px; margin-bottom: 2px; }
+    .main-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr);
+      gap: 18px;
+      align-items: start;
+    }
+    .panel {
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      padding: 13px 15px;
+      border-bottom: 1px solid var(--border);
+    }
+    .panel-body { padding: 16px; }
+    .caption { color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .stage { display: none; min-height: 470px; }
+    .stage.active { display: block; }
+    .sequence-track {
+      display: grid;
+      grid-template-columns: repeat(64, 1fr);
+      gap: 2px;
+      margin: 58px 0 12px;
+    }
+    .sequence-tile {
+      height: 30px;
+      border: 1px solid var(--grid);
+      border-radius: 2px;
+      background: var(--surface-2);
+      padding: 0;
+      min-height: 0;
+    }
+    .sequence-tile.past { background: color-mix(in srgb, var(--query) 12%, var(--surface-2)); }
+    .sequence-tile.current { background: var(--query); border-color: var(--query); transform: scaleY(1.35); }
+    .axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+    .tile-detail {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 34px;
+    }
+    .datum { padding-top: 10px; border-top: 2px solid var(--border); }
+    .datum strong { display: block; margin-top: 3px; font-size: 19px; font-weight: 550; }
+    .query-strip {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(32, 1fr);
+      gap: 2px;
+      margin: 68px 0 16px;
+    }
+    .q-token { height: 44px; background: var(--surface-2); border: 1px solid var(--grid); }
+    .q-token.probe-a { background: var(--probe-a); }
+    .q-token.probe-b { background: var(--probe-b); }
+    .q-token.probe-c { background: var(--probe-c); }
+    .probe-label {
+      position: absolute;
+      bottom: calc(100% + 8px);
+      transform: translateX(-50%);
+      width: 100px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 11px;
+    }
+    .probe-label::after { content: ""; display: block; width: 1px; height: 9px; margin: 4px auto -8px; background: currentColor; }
+    .probe-weights { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 26px; }
+    .probe-weight { padding: 10px; border-left: 4px solid var(--border); background: var(--surface-2); }
+    .probe-weight:nth-child(1) { border-color: var(--probe-a); }
+    .probe-weight:nth-child(2) { border-color: var(--probe-b); }
+    .probe-weight:nth-child(3) { border-color: var(--probe-c); }
+    .probe-weight:nth-child(4) { border-color: var(--probe-d); }
+    .score-map {
+      display: grid;
+      grid-template-columns: repeat(128, 1fr);
+      gap: 1px;
+      height: 160px;
+      align-items: end;
+      margin: 38px 0 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .score-bar { min-width: 1px; background: var(--key); opacity: .44; }
+    .score-bar.target { background: var(--selected); opacity: 1; }
+    .score-bar.future { height: 8px !important; background: var(--future); opacity: 1; }
+    .budget-line {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 10px;
+      align-items: center;
+      margin-top: 22px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .budget-line::before, .budget-line::after { content: ""; height: 1px; background: var(--border); }
+    .candidate-list { display: grid; gap: 18px; margin-top: 18px; }
+    .candidate-row { display: grid; grid-template-columns: 74px minmax(0, 1fr) 86px; gap: 12px; align-items: center; }
+    .candidate-blocks { display: grid; gap: 2px; height: 36px; }
+    .candidate-block { border: 1px solid var(--border); background: var(--surface-2); }
+    .candidate-block.kept { border-color: var(--selected); background: var(--selected-soft); }
+    .candidate-row.chosen { padding: 8px; margin: -8px; outline: 2px solid var(--query); outline-offset: 2px; }
+    .candidate-value { text-align: right; font-variant-numeric: tabular-nums; }
+    .share-band {
+      display: grid;
+      grid-template-columns: minmax(150px, .7fr) minmax(0, 1.3fr);
+      gap: 14px;
+      margin-top: 26px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+    .head-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+    .head-node {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 32px;
+      border: 1px solid var(--selected);
+      border-radius: 4px;
+      background: var(--selected-soft);
+      font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .tile-size-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 9px; }
+    .tile-size {
+      min-width: 0;
+      padding: 7px 4px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--surface-2);
+      text-align: center;
+      font-size: 11px;
+    }
+    .tile-size.current { border-color: var(--query); box-shadow: inset 0 0 0 1px var(--query); }
+    .matrix-wrap { display: grid; grid-template-columns: 36px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 28px; gap: 7px; width: min(100%, 500px); margin: 24px auto 0; }
+    .matrix-context {
+      display: flex;
+      justify-content: center;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 6px 12px;
+      margin-top: 18px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 12px;
+    }
+    .matrix-context strong { color: var(--text); font-weight: 600; }
+    .matrix-axis { color: var(--muted); font-size: 11px; display: grid; place-items: center; }
+    .matrix-axis.y { writing-mode: vertical-rl; transform: rotate(180deg); }
+    .causal-matrix { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; aspect-ratio: 1; }
+    .pair { border: 1px solid var(--grid); background: var(--surface-2); }
+    .pair.future { border-color: transparent; background: var(--future); opacity: .52; }
+    .pair.kept { border-color: var(--selected); background: var(--selected-soft); }
+    .mask-legend {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .mask-legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .mask-swatch { width: 14px; height: 14px; border: 1px solid var(--grid); background: var(--surface-2); }
+    .mask-swatch.kept { border-color: var(--selected); background: var(--selected-soft); }
+    .mask-swatch.future { border-color: transparent; background: var(--future); opacity: .52; }
+    .kernel-cost {
+      display: grid;
+      grid-template-columns: 1.1fr repeat(3, 1fr);
+      margin-top: 16px;
+      border-top: 1px solid var(--border);
+      border-left: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .kernel-cost > span {
+      padding: 7px 8px;
+      border-right: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      text-align: center;
+    }
+    .kernel-cost .label { color: var(--muted); text-align: left; }
+    .multiply-flow {
+      display: grid;
+      grid-template-columns: minmax(120px, 1fr) 28px minmax(120px, 1fr) 28px minmax(150px, 1.2fr);
+      gap: 10px;
+      align-items: center;
+      margin: 24px 0;
+    }
+    .tensor {
+      display: grid;
+      place-items: center;
+      min-height: 180px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      background-color: var(--surface-2);
+      background-image:
+        linear-gradient(to right, color-mix(in srgb, var(--grid) 72%, transparent) 1px, transparent 1px),
+        linear-gradient(to bottom, color-mix(in srgb, var(--grid) 72%, transparent) 1px, transparent 1px);
+      background-size: 14px 14px;
+      text-align: center;
+    }
+    .tensor.k { min-height: 116px; border-color: var(--key); }
+    .tensor.q { border-color: var(--query); }
+    .tensor.score { border-color: var(--selected); }
+    .tensor strong { display: block; padding: 3px 7px; background: var(--surface); font-size: 16px; }
+    .tensor span { display: block; margin-top: 4px; padding: 2px 5px; background: var(--surface); color: var(--muted); font-size: 11px; }
+    .operator { color: var(--muted); text-align: center; font-size: 24px; }
+    .compute-lane {
+      display: grid;
+      grid-template-columns: 130px minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+      padding: 9px 0;
+      border-top: 1px solid var(--border);
+    }
+    .compute-lane:last-child { border-bottom: 1px solid var(--border); }
+    .chunk-track { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+    .chunk { height: 18px; border: 1px solid var(--key); background: color-mix(in srgb, var(--key) 18%, transparent); }
+    .side-stack { display: grid; gap: 18px; }
+    .scope-path { display: grid; gap: 0; }
+    .scope-node { position: relative; padding: 10px 10px 10px 30px; border-bottom: 1px solid var(--border); }
+    .scope-node:last-child { border-bottom: 0; }
+    .scope-node::before { content: ""; position: absolute; left: 12px; top: 0; bottom: 0; width: 1px; background: var(--border); }
+    .scope-node::after { content: ""; position: absolute; left: 9px; top: 17px; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+    .scope-node.active::after { background: var(--selected); }
+    .scope-node strong { display: block; font-weight: 600; }
+    .scope-node span { color: var(--muted); font-size: 12px; }
+    .budget-rows { display: grid; gap: 7px; margin-top: 12px; }
+    .budget-row { display: grid; grid-template-columns: 78px 1fr auto; gap: 8px; align-items: center; font-size: 12px; }
+    .budget-meter { height: 8px; background: var(--surface-2); overflow: hidden; }
+    .budget-meter span { display: block; height: 100%; background: var(--selected); }
+    .note-list { display: grid; gap: 10px; }
+    .note { padding-left: 12px; border-left: 3px solid var(--border); line-height: 1.55; }
+    .note strong { color: var(--text); }
+    .flow-footer {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 18px;
+      padding: 12px 6px;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .method-notes { margin-top: 14px; }
+    .method-steps {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .method-step {
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 14px;
+      background: #fff;
+    }
+    .method-step h3 { margin: 0 0 7px; font-size: 14px; }
+    .method-step p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .method-step code { color: var(--ink); }
+    .detail-list {
+      margin: 12px 0 0;
+      padding-left: 19px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+    .flow-footer b { color: var(--text); font-weight: 600; }
+    @media (max-width: 820px) {
+      .app { padding: 14px; }
+      .header { align-items: flex-start; flex-direction: column; }
+      .header-note { text-align: left; }
+      .control-band { grid-template-columns: 1fr 1fr; }
+      .control-band .control:first-child { grid-column: 1 / -1; }
+      .pipeline { grid-template-columns: 1fr; }
+      .pipeline button { min-height: 44px; border-right: 0; border-bottom: 1px solid var(--border); }
+      .main-grid { grid-template-columns: 1fr; }
+      .method-steps { grid-template-columns: 1fr; }
+      .stage { min-height: 430px; }
+      .tile-detail, .probe-weights { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 480px) {
+      h1 { font-size: 24px; }
+      .control-band { grid-template-columns: 1fr; }
+      .control-band .control:first-child { grid-column: auto; }
+      .sequence-track { grid-template-columns: repeat(32, 1fr); }
+      .candidate-row { grid-template-columns: 58px minmax(0, 1fr) 70px; }
+      .share-band { grid-template-columns: 1fr; }
+      .multiply-flow { grid-template-columns: 1fr; }
+      .operator { transform: rotate(90deg); }
+    }
+  </style>
+</head>
+<body>
+  <main class="app" id="autoblock-app">
+    <header class="header">
+      <div>
+        <div class="eyebrow">SharePrefill-AE K=3 · token-first routing</div>
+        <h1>AutoBlock Mask Generation</h1>
+        <nav class="lang-switch" aria-label="Language"><a href="autoblock-mask-generation-zh.html">中文</a><a class="active" href="autoblock-mask-generation-en.html">English</a></nav>
+      </div>
+      <p class="header-note">Each layer, head group, and 128-query tile produces an independent mask row; 8,192 is that row's budget along the key axis.</p>
+    </header>
+
+    <section class="control-band" aria-label="Current selector row">
+      <label class="control">
+        <span class="control-head"><span>Query tile</span><output id="tile-output">100 / 255</output></span>
+        <input id="tile-range" type="range" min="0" max="255" value="100" step="1">
+      </label>
+      <label class="control">
+        <span class="control-head"><span>Layer</span><span>recomputed per layer</span></span>
+        <select id="layer-select" aria-label="Layer"><option>Layer 0</option><option selected>Layer 12</option><option>Layer 27</option></select>
+      </label>
+      <label class="control">
+        <span class="control-head"><span>Head group</span><span>K=3</span></span>
+        <select id="group-select" aria-label="Head group"><option>Group 0</option><option selected>Group 1</option><option>Group 2</option></select>
+      </label>
+    </section>
+
+    <nav class="pipeline" aria-label="Mask generation stages">
+      <button type="button" data-stage="0" aria-pressed="true"><span class="step-num">01</span>Partition Query Tiles</button>
+      <button type="button" data-stage="1" aria-pressed="false"><span class="step-num">02</span>Build Four Probes</button>
+      <button type="button" data-stage="2" aria-pressed="false"><span class="step-num">03</span>Key-Token Top-K</button>
+      <button type="button" data-stage="3" aria-pressed="false"><span class="step-num">04</span>Dynamic Block Projection</button>
+      <button type="button" data-stage="4" aria-pressed="false"><span class="step-num">05</span>Exact Per-Query Causal</button>
+      <button type="button" data-stage="5" aria-pressed="false"><span class="step-num">06</span>QK × Softmax × V</button>
+    </nav>
+
+    <div class="main-grid">
+      <section class="panel" aria-live="polite">
+        <div class="panel-head"><h2 id="stage-title">Partition a 32K Query Sequence into 256 Tiles</h2><span class="caption" id="stage-meta">one tile = 128 Q tokens</span></div>
+        <div class="panel-body">
+          <div class="stage active" data-stage-panel="0">
+            <div id="sequence-track" class="sequence-track" aria-label="256 query tiles"></div>
+            <div class="axis"><span>Q position 0</span><span>32,768</span></div>
+            <div class="tile-detail">
+              <div class="datum"><span class="caption">Current Tile</span><strong id="tile-id">100</strong></div>
+              <div class="datum"><span class="caption">Query Range</span><strong id="query-range">12,800–12,927</strong></div>
+              <div class="datum"><span class="caption">Tile-Visible Keys</span><strong id="key-envelope">0–12,927</strong></div>
+              <div class="datum"><span class="caption">Independent Mask Row</span><strong>1</strong></div>
+            </div>
+          </div>
+
+          <div class="stage" data-stage-panel="1">
+            <div class="query-strip" id="query-strip" aria-label="128 query tokens and four probes">
+              <span class="probe-label" style="left:33%">1/3 · 0.2</span>
+              <span class="probe-label" style="left:66%">2/3 · 0.3</span>
+              <span class="probe-label" style="left:98%">last · 0.4</span>
+            </div>
+            <div class="axis"><span id="probe-start">Q 12,800</span><span id="probe-end">Q 12,927</span></div>
+            <div class="probe-weights">
+              <div class="probe-weight"><span class="caption">Position Probe</span><strong>q<sub>1/3</sub> × 0.2</strong></div>
+              <div class="probe-weight"><span class="caption">Position Probe</span><strong>q<sub>2/3</sub> × 0.3</strong></div>
+              <div class="probe-weight"><span class="caption">Position Probe</span><strong>q<sub>last</sub> × 0.4</strong></div>
+              <div class="probe-weight"><span class="caption">Mean of 128 Q</span><strong>q<sub>mean</sub> × 0.1</strong></div>
+            </div>
+            <div class="budget-line"><span>s<sub>j</sub> = 0.2s<sub>1/3,j</sub> + 0.3s<sub>2/3,j</sub> + 0.4s<sub>last,j</sub> + 0.1s<sub>mean,j</sub></span></div>
+          </div>
+
+          <div class="stage" data-stage-panel="2">
+            <div id="score-map" class="score-map" aria-label="Weighted scores over key tokens"></div>
+            <div class="axis"><span>K position 0</span><span id="causal-boundary">tile-end causal boundary: 12,928</span><span>32,768</span></div>
+            <div class="budget-line"><span id="target-budget-label">Current row: select Top-8,192 from 12,928 legal keys</span></div>
+            <div class="tile-detail">
+              <div class="datum"><span class="caption">Target Tokens</span><strong id="target-count">8,192</strong></div>
+              <div class="datum"><span class="caption">Budget Scope</span><strong>Layer × Group × Tile</strong></div>
+              <div class="datum"><span class="caption">Future Keys</span><strong id="future-count">19,840</strong></div>
+              <div class="datum"><span class="caption">Selection</span><strong>Top-K along Key Axis</strong></div>
+            </div>
+          </div>
+
+          <div class="stage" data-stage-panel="3">
+            <p class="caption">Project the same token target mask onto 32-, 64-, and 128-token K blocks. Prefer the larger block when its target coverage is within two percentage points of the best candidate.</p>
+            <div class="candidate-list" id="candidate-list"></div>
+            <div class="tile-detail">
+              <div class="datum"><span class="caption">Target Budget</span><strong id="block-target">8,192</strong></div>
+              <div class="datum"><span class="caption">Expanded-Token Cap</span><strong>8,192</strong></div>
+              <div class="datum"><span class="caption">Minimum Block Coverage</span><strong>12.5%</strong></div>
+              <div class="datum"><span class="caption">Current Choice</span><strong id="chosen-size">64</strong></div>
+            </div>
+            <div class="share-band">
+              <div>
+                <h3 id="share-group-title">Member Heads in the Same Group</h3>
+                <div class="head-row">
+                  <span class="head-node">H₁</span><span class="head-node">H₂</span><span class="head-node">H₃</span><span class="head-node">…</span>
+                </div>
+                <p class="caption" style="margin-top:8px">For this query tile, all member heads share the block size, block mask, and expanded K-token IDs; Q/K/V values remain head-specific.</p>
+              </div>
+              <div>
+                <h3>Neighboring Query Tiles in the Same Layer / Group</h3>
+                <div class="tile-size-row" id="tile-size-row"></div>
+                <p class="caption" style="margin-top:8px">Each tile is an independent selector row, so neighboring tiles may choose different block sizes.</p>
+              </div>
+            </div>
+            <div class="kernel-cost" aria-label="Logical block and kernel chunk comparison at a full 8192-token budget">
+              <span class="label">Logical Block Size</span><span>32</span><span>64</span><span>128</span>
+              <span class="label">Maximum Logical Blocks</span><span>256</span><span>128</span><span>64</span>
+              <span class="label">32-K Chunks at 8,192 Keys</span><span>256</span><span>256</span><span>256</span>
+            </div>
+            <p class="caption" style="margin-top:8px">The compact kernel first expands blocks. If all candidates expand to exactly 8,192 K tokens, their QK arithmetic is identical; larger blocks mainly reduce logical-block metadata. Attention execution changes only when the final K count or memory locality changes.</p>
+          </div>
+
+          <div class="stage" data-stage-panel="4">
+            <p class="caption">Token selection and projection first use <code>key &lt; query_tile_end</code>; during execution, each Q token independently applies <code>key_position ≤ query_position</code>.</p>
+            <div class="matrix-context"><strong id="causal-context">Layer 12 · Group 1 · Query tile 100</strong><span>A sampled 16Q × 16K slice of the mask shared by group members; it is not a head.</span></div>
+            <div class="matrix-wrap">
+              <div class="matrix-axis y">16 sampled Q positions</div>
+              <div id="causal-matrix" class="causal-matrix" aria-label="Exact per-query causal mask"></div>
+              <div></div><div class="matrix-axis">16 sampled local K positions →</div>
+            </div>
+            <div class="mask-legend" aria-label="Mask-state legend">
+              <span><i class="mask-swatch kept"></i>Selected and causal: enters softmax</span>
+              <span><i class="mask-swatch"></i>Causal-legal but not selected</span>
+              <span><i class="mask-swatch future"></i>Future: logit set to −∞</span>
+            </div>
+            <p class="caption" style="margin-top:10px;text-align:center">Each cell is the mask state of one sampled (Q<sub>i</sub>, K<sub>j</sub>) pair, not an attention-score magnitude.</p>
+            <div class="budget-line"><span>Shared block structure ≠ shared attention values; every head uses its own Q/K/V and renormalizes over legal positions</span></div>
+          </div>
+
+          <div class="stage" data-stage-panel="5">
+            <p class="caption">Selected logical K blocks are expanded into token IDs and streamed to the Triton kernel in groups of 32 keys. All 128 valid Q tokens in the tile participate; a selected K is not paired with only one Q.</p>
+            <div class="multiply-flow">
+              <div class="tensor q"><div><strong>Q<sub>tile,h</sub></strong><span>128 × d · this head's Q</span></div></div>
+              <div class="operator">×</div>
+              <div class="tensor k"><div><strong>K<sub>chunk,h</sub><sup>T</sup></strong><span>d × 32 · selected K IDs</span></div></div>
+              <div class="operator">→</div>
+              <div class="tensor score"><div><strong>QK Scores</strong><span>128 × 32 · every Q against this K chunk</span></div></div>
+            </div>
+            <div class="compute-lane"><strong>1. Expand Blocks</strong><span>Uniform selected blocks → one position-sorted K-token ID list, capped at 8,192.</span></div>
+            <div class="compute-lane"><strong>2. 32-K Chunks</strong><div class="chunk-track" aria-label="Selected keys split into chunks"><span class="chunk"></span><span class="chunk"></span><span class="chunk"></span><span class="chunk"></span><span class="chunk"></span><span class="chunk"></span><span class="chunk"></span><span class="chunk"></span></div></div>
+            <div class="compute-lane"><strong>3. Exact Causal Mask</strong><span>Within every 128 × 32 score tile, check <code>query_position ≥ key_position</code>; set illegal logits to −∞.</span></div>
+            <div class="compute-lane"><strong>4. Online Softmax</strong><span>Accumulate each Q's maximum, normalization term, and output across all K chunks without materializing a 128 × 8,192 matrix.</span></div>
+            <div class="compute-lane"><strong>5. Multiply by V</strong><span>Each chunk computes P × V, producing a 128 × d output for this head; concatenate head outputs and apply W<sub>O</sub>.</span></div>
+            <div class="budget-line"><span>The group shares where to compute; each head independently determines scores, probabilities, and outputs</span></div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="side-stack">
+        <section class="panel">
+          <div class="panel-head"><h2>Scope of 8,192</h2><span class="caption">not shared across a layer</span></div>
+          <div class="panel-body scope-path">
+            <div class="scope-node"><strong>Sample 0</strong><span>32K input</span></div>
+            <div class="scope-node"><strong id="scope-layer">Layer 12</strong><span>recomputed from this layer's hidden states</span></div>
+            <div class="scope-node"><strong id="scope-group">Group 1</strong><span>the representative head selects positions</span></div>
+            <div class="scope-node active"><strong id="scope-tile">Query tile 100</strong><span>this row independently receives up to 8,192 K tokens</span></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2>Neighboring Tiles Have Separate Budgets</h2><span class="caption">no budget sharing</span></div>
+          <div class="panel-body">
+            <div class="budget-rows" id="budget-rows"></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head"><h2>Two-Level Causal Constraint</h2></div>
+          <div class="panel-body note-list">
+            <div class="note"><strong>Selector:</strong> mask keys after the tile end before Top-K.</div>
+            <div class="note"><strong>Kernel:</strong> check <code>j ≤ i</code> for every query and set future logits to −∞.</div>
+            <div class="note"><strong>Final count:</strong> each row covers at most 8,192 keys; short histories, coverage filtering, and boundary blocks may reduce it.</div>
+          </div>
+        </section>
+      </aside>
+    </div>
+
+    <section class="panel method-notes">
+      <div class="panel-head"><h2>Complete AutoBlock Procedure and Implementation Boundaries</h2><span class="caption">SharePrefill-AE K=3 · token-first</span></div>
+      <div class="panel-body">
+        <div class="method-steps">
+          <article class="method-step"><h3>1. Offline Grouping and Layer-Sequential Execution</h3><p>The AE learns latent embeddings from calibration attention maps. Each layer is then partitioned into three fixed head groups with one representative per group. Inference still follows the Transformer stack sequentially: the current layer builds its masks, computes all heads, concatenates them, and applies <code>W_O</code>; the resulting hidden states enter the next layer, which constructs new masks from its own Q/K states.</p></article>
+          <article class="method-step"><h3>2. Construct Selector Rows</h3><p>Each layer's queries are partitioned into 128-token tiles. One selector row is built independently for every <code>layer × group × query tile</code>. A 32K input contains 256 query tiles, hence 256 rows per group. The 8,192-key cap belongs to one such row along the K axis; it is not shared by the layer, group, or sample.</p></article>
+          <article class="method-step"><h3>3. Score Key Tokens with Four Probes</h3><p>The representative head performs routing only. A tile uses the queries at one-third, two-thirds, and the last position, plus the mean of all 128 queries. Each legal key receives <code>0.2·s1/3 + 0.3·s2/3 + 0.4·slast + 0.1·smean</code>. These probes approximate routing importance; they do not replace the 128 queries in the actual attention computation.</p></article>
+          <article class="method-step"><h3>4. Token-First Top-8,192</h3><p>The selector first excludes keys after the query-tile endpoint, then retains up to 8,192 target key tokens by weighted score. A shorter history can retain only its visible keys. This cap is an empirical accuracy-sparsity-kernel-cost operating point, not a theoretically optimal constant.</p></article>
+          <article class="method-step"><h3>5. Dynamic Block Projection</h3><p>The same target-token mask is projected onto candidate K-block sizes of 32, 64, and 128 tokens. Ordinary blocks covering less than 12.5% target tokens are discarded. Sink and local/diagonal blocks are forced and counted inside the final 8,192 expanded-token budget. We measure target coverage for each candidate and choose the largest block size within two percentage points of the best coverage.</p></article>
+          <article class="method-step"><h3>6. Shared Structure, Head-Specific Attention</h3><p>Heads in one <code>layer × group × query tile</code> share the chosen block size, block mask, and expanded K-token IDs, but not Q/K/V values or attention probabilities. Neighboring query tiles may choose different block sizes, as may different groups in the same layer.</p></article>
+          <article class="method-step"><h3>7. QK, Exact Causal Masking, and Softmax</h3><p>Selected blocks expand into K IDs and enter the kernel in fixed 32-key chunks. Each head independently computes <code>Q[128,d] × K_chunk[d,32]</code>. The kernel then applies an exact absolute-position causal mask to every Q-K pair, sets illegal logits to <code>-∞</code>, and performs online softmax and <code>P×V</code> across all chunks. Softmax renormalizes the retained legal positions to sum to one; no additional heuristic rescaling is applied.</p></article>
+          <article class="method-step"><h3>8. Reading the Matrix and Chunks</h3><p>The 16×16 grid is only a sampled 16Q×16K slice of the shared mask: one cell indicates whether one Q-K pair participates. It is neither a head nor a score magnitude. The 32-key chunk is a fixed kernel execution tile, independent of logical block size. If all candidates expand to the same K count, QK arithmetic is unchanged; larger blocks mainly reduce metadata and may improve memory locality.</p></article>
+        </div>
+        <ul class="detail-list">
+          <li>Two causal stages are used: the selector applies a coarse tile-end boundary, while the kernel enforces the exact position constraint for every query.</li>
+          <li>Forced sink/local blocks protect global anchors and local dependencies but consume the final budget, reducing capacity for ordinary blocks.</li>
+          <li>The representative head generates shared routing; it does not compute a dense attention result reused by member heads. Every member head still computes its own attention.</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="flow-footer">
+      <b>Current-Layer Q/K/V</b><span>→</span><span>Representative per Group</span><span>→</span><span>All Query Tiles</span><span>→</span><span>Top-8,192 per Row</span><span>→</span><span>Group-Shared Dynamic Blocks</span><span>→</span><span>128Q × 32K Chunks</span><span>→</span><span>Per-Query Causal Softmax</span><span>→</span><b>Next Layer</b>
+    </footer>
+  </main>
+
+  <script>
+    (() => {
+      const root = document.getElementById('autoblock-app');
+      const tileRange = root.querySelector('#tile-range');
+      const layerSelect = root.querySelector('#layer-select');
+      const groupSelect = root.querySelector('#group-select');
+      const stageButtons = [...root.querySelectorAll('[data-stage]')];
+      const stagePanels = [...root.querySelectorAll('[data-stage-panel]')];
+      const titles = [
+        ['Partition a 32K Query Sequence into 256 Tiles', 'one tile = 128 Q tokens'],
+        ['Represent One Query Tile with Four Probes', 'four probes per tile, not four per query'],
+        ['Weighted Probe Scoring over Legal Key Tokens', 'independent Top-K for every selector row'],
+        ['Project the Token Target onto Dynamic Blocks', 'candidate K block = 32 / 64 / 128'],
+        ['Apply an Exact Per-Query Causal Mask in the Kernel', 'softmax normalizes only selected legal positions'],
+        ['Multiply All Q by Selected K in Chunks', 'head-specific QK, softmax, and P×V']
+      ];
+      let stage = 0;
+
+      function currentTile() { return Number(tileRange.value); }
+      function rowTarget(tile) { return Math.min(8192, (tile + 1) * 128); }
+      function fmt(value) { return value.toLocaleString('en-US'); }
+
+      function drawSequence() {
+        const track = root.querySelector('#sequence-track');
+        const tile = currentTile();
+        track.replaceChildren();
+        for (let i = 0; i < 64; i += 1) {
+          const el = document.createElement('button');
+          el.type = 'button';
+          el.className = 'sequence-tile';
+          const represented = i * 4;
+          if (represented < tile) el.classList.add('past');
+          if (tile >= represented && tile < represented + 4) el.classList.add('current');
+          el.title = `Tiles ${represented}–${Math.min(255, represented + 3)}`;
+          el.addEventListener('click', () => { tileRange.value = String(Math.min(255, represented + 2)); update(); });
+          track.appendChild(el);
+        }
+      }
+
+      function drawQueryStrip() {
+        const strip = root.querySelector('#query-strip');
+        [...strip.querySelectorAll('.q-token')].forEach(el => el.remove());
+        for (let i = 0; i < 32; i += 1) {
+          const el = document.createElement('span');
+          el.className = 'q-token';
+          if (i === 10) el.classList.add('probe-a');
+          if (i === 21) el.classList.add('probe-b');
+          if (i === 31) el.classList.add('probe-c');
+          strip.appendChild(el);
+        }
+      }
+
+      function pseudoScore(index, tile) {
+        return 0.16 + 0.72 * Math.abs(Math.sin(index * 1.91 + tile * .13) * Math.cos(index * .37 - tile * .07));
+      }
+
+      function drawScores() {
+        const map = root.querySelector('#score-map');
+        const tile = currentTile();
+        const causalBins = Math.ceil(((tile + 1) * 128) / 256);
+        const budgetBins = Math.min(32, causalBins);
+        const candidates = [];
+        for (let i = 0; i < causalBins; i += 1) candidates.push({i, score: pseudoScore(i, tile)});
+        const targets = new Set(candidates.sort((a, b) => b.score - a.score).slice(0, budgetBins).map(d => d.i));
+        map.replaceChildren();
+        for (let i = 0; i < 128; i += 1) {
+          const el = document.createElement('span');
+          el.className = 'score-bar';
+          if (i >= causalBins) el.classList.add('future');
+          if (targets.has(i)) el.classList.add('target');
+          el.style.height = `${10 + pseudoScore(i, tile) * 135}px`;
+          map.appendChild(el);
+        }
+      }
+
+      function candidateCoverage(tile, size) {
+        const wave = Math.sin(tile * .9 + size * .05);
+        const base = size === 32 ? .94 : size === 64 ? .925 : .9;
+        return Math.max(.83, Math.min(.97, base + wave * .025));
+      }
+
+      function drawCandidates() {
+        const list = root.querySelector('#candidate-list');
+        const tile = currentTile();
+        const sizes = [32, 64, 128];
+        const values = sizes.map(size => ({size, coverage: candidateCoverage(tile, size)}));
+        const best = Math.max(...values.map(d => d.coverage));
+        const eligible = values.filter(d => d.coverage >= best - .02);
+        const chosen = Math.max(...eligible.map(d => d.size));
+        list.replaceChildren();
+        values.forEach(({size, coverage}) => {
+          const row = document.createElement('div');
+          row.className = `candidate-row${size === chosen ? ' chosen' : ''}`;
+          const label = document.createElement('strong');
+          label.textContent = `${size} K`;
+          const blocks = document.createElement('div');
+          blocks.className = 'candidate-blocks';
+          const count = size === 32 ? 24 : size === 64 ? 12 : 6;
+          blocks.style.gridTemplateColumns = `repeat(${count}, 1fr)`;
+          for (let i = 0; i < count; i += 1) {
+            const b = document.createElement('span');
+            b.className = 'candidate-block';
+            if (((i * 7 + tile + size) % 11) / 11 < coverage * .72) b.classList.add('kept');
+            blocks.appendChild(b);
+          }
+          const value = document.createElement('span');
+          value.className = 'candidate-value';
+          value.textContent = `${(coverage * 100).toFixed(1)}%`;
+          row.append(label, blocks, value);
+          list.appendChild(row);
+        });
+        root.querySelector('#chosen-size').textContent = `${chosen} K`;
+        root.querySelector('#share-group-title').textContent = `Member Heads in ${groupSelect.value}`;
+        const tileSizeRow = root.querySelector('#tile-size-row');
+        tileSizeRow.replaceChildren();
+        for (let delta = -2; delta <= 2; delta += 1) {
+          const neighbor = Math.max(0, Math.min(255, tile + delta));
+          const neighborValues = sizes.map(size => ({size, coverage: candidateCoverage(neighbor, size)}));
+          const neighborBest = Math.max(...neighborValues.map(d => d.coverage));
+          const neighborChosen = Math.max(...neighborValues.filter(d => d.coverage >= neighborBest - .02).map(d => d.size));
+          const cell = document.createElement('span');
+          cell.className = `tile-size${delta === 0 ? ' current' : ''}`;
+          cell.innerHTML = `T${neighbor}<br><strong>${neighborChosen}K</strong>`;
+          tileSizeRow.appendChild(cell);
+        }
+      }
+
+      function drawCausalMatrix() {
+        const matrix = root.querySelector('#causal-matrix');
+        const tile = currentTile();
+        matrix.replaceChildren();
+        for (let q = 0; q < 16; q += 1) {
+          for (let k = 0; k < 16; k += 1) {
+            const el = document.createElement('span');
+            el.className = 'pair';
+            if (k > q) el.classList.add('future');
+            else if ((k === 0 || q - k < 4 || (q * 5 + k * 3 + tile) % 9 < 3)) el.classList.add('kept');
+            matrix.appendChild(el);
+          }
+        }
+      }
+
+      function drawBudgetRows() {
+        const box = root.querySelector('#budget-rows');
+        const tile = currentTile();
+        box.replaceChildren();
+        for (let delta = -2; delta <= 2; delta += 1) {
+          const t = Math.max(0, Math.min(255, tile + delta));
+          const count = rowTarget(t);
+          const row = document.createElement('div');
+          row.className = 'budget-row';
+          row.innerHTML = `<span>Tile ${t}</span><span class="budget-meter"><span style="width:${count / 8192 * 100}%"></span></span><strong>${fmt(count)}</strong>`;
+          box.appendChild(row);
+        }
+      }
+
+      function update() {
+        const tile = currentTile();
+        const start = tile * 128;
+        const end = start + 127;
+        const queryEnd = end + 1;
+        const target = rowTarget(tile);
+        root.querySelector('#tile-output').textContent = `${tile} / 255`;
+        root.querySelector('#tile-id').textContent = tile;
+        root.querySelector('#query-range').textContent = `${fmt(start)}–${fmt(end)}`;
+        root.querySelector('#key-envelope').textContent = `0–${fmt(end)}`;
+        root.querySelector('#probe-start').textContent = `Q ${fmt(start)}`;
+        root.querySelector('#probe-end').textContent = `Q ${fmt(end)}`;
+        root.querySelector('#causal-boundary').textContent = `tile-end causal boundary: ${fmt(queryEnd)}`;
+        root.querySelector('#target-budget-label').textContent = `Current row: select Top-${fmt(target)} from ${fmt(queryEnd)} legal keys`;
+        root.querySelector('#target-count').textContent = fmt(target);
+        root.querySelector('#future-count').textContent = fmt(32768 - queryEnd);
+        root.querySelector('#block-target').textContent = fmt(target);
+        root.querySelector('#scope-layer').textContent = layerSelect.value;
+        root.querySelector('#scope-group').textContent = groupSelect.value;
+        root.querySelector('#scope-tile').textContent = `Query tile ${tile}`;
+        root.querySelector('#causal-context').textContent = `${layerSelect.value} · ${groupSelect.value} · Query tile ${tile}`;
+        drawSequence();
+        drawScores();
+        drawCandidates();
+        drawBudgetRows();
+      }
+
+      function setStage(next) {
+        stage = next;
+        stageButtons.forEach((button, index) => button.setAttribute('aria-pressed', String(index === stage)));
+        stagePanels.forEach((panel, index) => panel.classList.toggle('active', index === stage));
+        root.querySelector('#stage-title').textContent = titles[stage][0];
+        root.querySelector('#stage-meta').textContent = titles[stage][1];
+      }
+
+      stageButtons.forEach(button => button.addEventListener('click', () => setStage(Number(button.dataset.stage))));
+      tileRange.addEventListener('input', update);
+      layerSelect.addEventListener('change', update);
+      groupSelect.addEventListener('change', update);
+      drawQueryStrip();
+      drawCausalMatrix();
+      update();
+      setStage(0);
+    })();
+  </script>
+</body>
+</html>

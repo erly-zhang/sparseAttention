@@ -15,6 +15,14 @@ experiments/data/
 datasets/
 model/
 ruler_data/
+results/raw/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.npy
+*.npz
 
 # Third-party cloned repositories (install separately)
 MInference/

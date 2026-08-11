@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Block Sparse Attention Explorer</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f7f8;
+      --surface: #ffffff;
+      --surface-2: #edf1f3;
+      --text: #172026;
+      --muted: #64727b;
+      --border: #cbd4d9;
+      --grid: #d9e0e4;
+      --query: #168aad;
+      --key: #d65a31;
+      --selected: #217a4b;
+      --selected-soft: #d9f1e3;
+      --sink: #7b61a8;
+      --diagonal: #b7791f;
+      --inactive: #e7ecef;
+      --danger: #b33a3a;
+      --shadow: 0 10px 30px rgba(26, 43, 52, 0.08);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111619;
+        --surface: #192126;
+        --surface-2: #222c32;
+        --text: #edf2f4;
+        --muted: #a8b4ba;
+        --border: #3b4a52;
+        --grid: #344149;
+        --query: #4db6d6;
+        --key: #f08a67;
+        --selected: #67c891;
+        --selected-soft: #183d2a;
+        --sink: #b59be0;
+        --diagonal: #e2b65d;
+        --inactive: #283239;
+        --danger: #ed7777;
+        --shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      min-height: 36px;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: var(--surface-2);
+    }
+
+    button:focus-visible,
+    input:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--query) 40%, transparent);
+      outline-offset: 2px;
+    }
+
+    button[aria-pressed="true"],
+    .primary {
+      background: var(--text);
+      border-color: var(--text);
+      color: var(--surface);
+    }
+
+    .app {
+      width: min(1240px, 100%);
+      margin: 0 auto;
+      padding: 22px;
+    }
+
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: clamp(24px, 4vw, 38px);
+      font-weight: 500;
+    }
+
+    h2 {
+      font-size: 17px;
+      font-weight: 500;
+    }
+
+    h3 {
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .eyebrow,
+    .caption,
+    .metric-label,
+    .legend,
+    .axis-label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .eyebrow {
+      margin-bottom: 5px;
+      text-transform: uppercase;
+    }
+
+    .segmented {
+      display: inline-grid;
+      grid-template-columns: repeat(2, minmax(110px, 1fr));
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      overflow: hidden;
+      background: var(--surface);
+    }
+
+    .segmented button {
+      border: 0;
+      border-radius: 0;
+      min-height: 38px;
+    }
+
+    .segmented button + button {
+      border-left: 1px solid var(--border);
+    }
+
+    .control-band {
+      display: grid;
+      grid-template-columns: minmax(190px, 1fr) minmax(220px, 1.2fr) auto;
+      gap: 18px;
+      align-items: center;
+      padding: 14px 16px;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 18px;
+    }
+
+    .control {
+      display: grid;
+      gap: 7px;
+    }
+
+    .control-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--selected);
+    }
+
+    .step-nav {
+      display: flex;
+      gap: 8px;
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.18fr) minmax(300px, 0.82fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      min-width: 0;
+    }
+
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .panel-body {
+      padding: 16px;
+    }
+
+    .attention-layout {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr) 34px;
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    .q-axis,
+    .k-axis {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .q-axis {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+    }
+
+    .block-grid {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      aspect-ratio: 1;
+      gap: 3px;
+      width: 100%;
+      max-width: 570px;
+      justify-self: center;
+    }
+
+    .block {
+      position: relative;
+      min-width: 0;
+      border: 1px solid var(--grid);
+      border-radius: 3px;
+      background: var(--inactive);
+      padding: 0;
+      aspect-ratio: 1;
+      transition: transform 140ms ease, opacity 140ms ease, background 140ms ease;
+    }
+
+    .block:hover:not(:disabled) {
+      transform: translateY(-1px);
+    }
+
+    .block:disabled {
+      cursor: default;
+      opacity: 0.32;
+    }
+
+    .block.valid {
+      background: var(--surface-2);
+    }
+
+    .block.selected {
+      background: var(--selected-soft);
+      border-color: var(--selected);
+    }
+
+    .block.sink::after,
+    .block.diagonal::before {
+      content: "";
+      position: absolute;
+      inset: 5px;
+      border-radius: 2px;
+      pointer-events: none;
+    }
+
+    .block.sink::after {
+      border-left: 4px solid var(--sink);
+    }
+
+    .block.diagonal::before {
+      border-bottom: 4px solid var(--diagonal);
+    }
+
+    .block.focused {
+      outline: 3px solid var(--query);
+      outline-offset: 1px;
+    }
+
+    .block-score {
+      display: grid;
+      place-items: center;
+      width: 100%;
+      height: 100%;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding-top: 12px;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .swatch {
+      width: 13px;
+      height: 13px;
+      border-radius: 2px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+
+    .swatch.selected {
+      background: var(--selected-soft);
+      border-color: var(--selected);
+    }
+
+    .swatch.sink {
+      border-left: 4px solid var(--sink);
+    }
+
+    .swatch.diagonal {
+      border-bottom: 4px solid var(--diagonal);
+    }
+
+    .detail-stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    .head-flow {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 44px minmax(0, 1.3fr);
+      align-items: center;
+      gap: 8px;
+    }
+
+    .head {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+      min-height: 70px;
+      display: grid;
+      align-content: center;
+      gap: 4px;
+      background: var(--surface-2);
+    }
+
+    .head.rep {
+      border-color: var(--query);
+    }
+
+    .members {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+
+    .member {
+      min-height: 70px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      display: grid;
+      place-items: center;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .arrow {
+      text-align: center;
+      color: var(--muted);
+      font-size: 22px;
+    }
+
+    .pair-wrap {
+      display: grid;
+      grid-template-columns: 26px minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr) 24px;
+      gap: 7px;
+    }
+
+    .pair-grid {
+      display: grid;
+      grid-template-columns: repeat(16, 1fr);
+      aspect-ratio: 1.55;
+      gap: 1px;
+      background: var(--grid);
+      border: 1px solid var(--grid);
+      max-height: 260px;
+      overflow: hidden;
+    }
+
+    .pair {
+      background: var(--inactive);
+      min-width: 0;
+    }
+
+    .pair.on {
+      background: var(--selected);
+    }
+
+    .pair.dimmed {
+      opacity: 0.28;
+    }
+
+    .k-token-strip {
+      grid-column: 2;
+      display: grid;
+      grid-template-columns: repeat(16, 1fr);
+      gap: 1px;
+      height: 24px;
+    }
+
+    .k-token {
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 9px;
+      border-top: 2px solid transparent;
+    }
+
+    .k-token.kept {
+      border-color: var(--key);
+      color: var(--text);
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border-top: 1px solid var(--border);
+    }
+
+    .metric {
+      padding: 12px 14px;
+      min-width: 0;
+    }
+
+    .metric + .metric {
+      border-left: 1px solid var(--border);
+    }
+
+    .metric-value {
+      display: block;
+      margin-top: 4px;
+      font-variant-numeric: tabular-nums;
+      font-size: 21px;
+      font-weight: 500;
+    }
+
+    .state-line {
+      min-height: 48px;
+      padding: 13px 16px;
+      border-left: 4px solid var(--query);
+      background: var(--surface-2);
+      display: flex;
+      align-items: center;
+      font-size: 13px;
+    }
+
+    .why-grid {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .comparison {
+      display: grid;
+      gap: 10px;
+    }
+
+    .comparison-row {
+      display: grid;
+      grid-template-columns: 108px minmax(0, 1fr) 70px;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+    }
+
+    .bar-track {
+      height: 14px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .bar {
+      height: 100%;
+      width: 100%;
+      background: var(--query);
+      transition: width 180ms ease;
+    }
+
+    .bar.key {
+      background: var(--selected);
+    }
+
+    .bar.query {
+      background: var(--danger);
+    }
+
+    @media (max-width: 880px) {
+      header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .control-band {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .step-nav {
+        grid-column: 1 / -1;
+      }
+
+      .main-grid,
+      .why-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 540px) {
+      .app {
+        padding: 14px;
+      }
+
+      .control-band {
+        grid-template-columns: 1fr;
+        padding-inline: 0;
+      }
+
+      .step-nav {
+        grid-column: auto;
+      }
+
+      .head-flow {
+        grid-template-columns: 1fr;
+      }
+
+      .arrow {
+        transform: rotate(90deg);
+      }
+
+      .metrics {
+        grid-template-columns: 1fr;
+      }
+
+      .metric + .metric {
+        border-left: 0;
+        border-top: 1px solid var(--border);
+      }
+
+      .comparison-row {
+        grid-template-columns: 86px minmax(0, 1fr) 58px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app" id="blockSparseApp">
+    <header>
+      <div>
+        <div class="eyebrow">Sparse Attention Lab</div>
+        <h1>Block Sparse 如何真正减少计算</h1>
+      </div>
+      <div class="segmented" aria-label="块内计算模式">
+        <button type="button" id="fullMode" aria-pressed="false">Full block</button>
+        <button type="button" id="compactMode" aria-pressed="true">Token compacted</button>
+      </div>
+    </header>
+
+    <section class="control-band" aria-label="实验参数">
+      <label class="control">
+        <span class="control-head">
+          <span>Block top-p</span>
+          <output id="blockTopPValue">0.90</output>
+        </span>
+        <input id="blockTopP" type="range" min="0.55" max="1" step="0.05" value="0.90">
+      </label>
+      <label class="control">
+        <span class="control-head">
+          <span>Block 内 K-token top-p</span>
+          <output id="tokenTopPValue">0.90</output>
+        </span>
+        <input id="tokenTopP" type="range" min="0.40" max="1" step="0.05" value="0.90">
+      </label>
+      <div class="step-nav" aria-label="流程步骤">
+        <button type="button" id="prevStep" aria-label="上一步">←</button>
+        <button type="button" id="playStep" class="primary">自动演示</button>
+        <button type="button" id="nextStep" aria-label="下一步">→</button>
+      </div>
+    </section>
+
+    <div class="main-grid">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Macro block mask</h2>
+            <span class="caption">8 × 8 示意网格；每格代表 128 × 128 token pairs</span>
+          </div>
+          <span class="caption" id="stepCount">步骤 1 / 4</span>
+        </div>
+        <div class="panel-body">
+          <div class="attention-layout">
+            <div class="q-axis">Q blocks</div>
+            <div class="block-grid" id="blockGrid" aria-label="因果 block attention 网格"></div>
+            <div></div>
+            <div class="k-axis">K blocks →</div>
+          </div>
+          <div class="legend">
+            <span class="legend-item"><span class="swatch selected"></span>top-p 选中</span>
+            <span class="legend-item"><span class="swatch sink"></span>sink block</span>
+            <span class="legend-item"><span class="swatch diagonal"></span>diagonal block</span>
+            <span class="legend-item"><span class="swatch"></span>跳过</span>
+          </div>
+        </div>
+        <div class="metrics">
+          <div class="metric">
+            <span class="metric-label">Block keep</span>
+            <strong class="metric-value" id="blockKeep">35.7%</strong>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Pair keep</span>
+            <strong class="metric-value" id="pairKeep">18.6%</strong>
+          </div>
+          <div class="metric">
+            <span class="metric-label">相对 dense 计算</span>
+            <strong class="metric-value" id="relativeCost">0.19×</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Selected block 内部</h2>
+            <span class="caption" id="focusedBlockLabel">Q7 → K4</span>
+          </div>
+          <span class="caption" id="tokenCount">保留 8 / 16 K tokens</span>
+        </div>
+        <div class="panel-body detail-stack">
+          <div class="head-flow">
+            <div class="head rep">
+              <h3>Representative head</h3>
+              <span class="caption">计算 block 与 token 排名</span>
+            </div>
+            <div class="arrow">→</div>
+            <div class="members" aria-label="共享 mask 的成员头">
+              <div class="member">Head A</div>
+              <div class="member">Head B</div>
+              <div class="member">Head C</div>
+            </div>
+          </div>
+
+          <div class="pair-wrap">
+            <div class="q-axis">128 Q</div>
+            <div class="pair-grid" id="pairGrid" aria-label="选中 block 内 token pair 计算网格"></div>
+            <div></div>
+            <div class="k-token-strip" id="kTokenStrip" aria-label="K token 保留状态"></div>
+          </div>
+
+          <div class="state-line" id="stateLine">
+            代表头先为每个 Q block 选择少量 K blocks；同组 heads 直接复用这张 block mask。
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="why-grid">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>为什么压缩 K，而不是删除 Q</h2>
+          <span class="caption">输出语义</span>
+        </div>
+        <div class="panel-body comparison">
+          <div class="comparison-row">
+            <span>保留全部 Q</span>
+            <div class="bar-track"><div class="bar" id="allQBar"></div></div>
+            <span>128 outputs</span>
+          </div>
+          <div class="comparison-row">
+            <span>压缩 K</span>
+            <div class="bar-track"><div class="bar key" id="keyBar"></div></div>
+            <span id="keyBarLabel">64 keys</span>
+          </div>
+          <div class="comparison-row">
+            <span>若压缩 Q</span>
+            <div class="bar-track"><div class="bar query" id="queryBar"></div></div>
+            <span id="queryBarLabel">64 outputs</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Kernel 工作量</h2>
+          <span class="caption">一个已选 128 × 128 block</span>
+        </div>
+        <div class="panel-body comparison">
+          <div class="comparison-row">
+            <span>Full block</span>
+            <div class="bar-track"><div class="bar" style="width:100%"></div></div>
+            <span>16,384 pairs</span>
+          </div>
+          <div class="comparison-row">
+            <span>Compact K</span>
+            <div class="bar-track"><div class="bar key" id="compactCostBar"></div></div>
+            <span id="compactPairs">8,192 pairs</span>
+          </div>
+          <div class="comparison-row">
+            <span>节省</span>
+            <div class="bar-track"><div class="bar query" id="savingBar"></div></div>
+            <span id="savingLabel">50.0%</span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      const app = document.getElementById("blockSparseApp");
+      const blockGrid = app.querySelector("#blockGrid");
+      const pairGrid = app.querySelector("#pairGrid");
+      const kTokenStrip = app.querySelector("#kTokenStrip");
+      const blockTopP = app.querySelector("#blockTopP");
+      const tokenTopP = app.querySelector("#tokenTopP");
+      const blockTopPValue = app.querySelector("#blockTopPValue");
+      const tokenTopPValue = app.querySelector("#tokenTopPValue");
+      const fullMode = app.querySelector("#fullMode");
+      const compactMode = app.querySelector("#compactMode");
+      const prevStep = app.querySelector("#prevStep");
+      const nextStep = app.querySelector("#nextStep");
+      const playStep = app.querySelector("#playStep");
+      const stepCount = app.querySelector("#stepCount");
+      const stateLine = app.querySelector("#stateLine");
+
+      const size = 8;
+      const tokenCols = 16;
+      const tokenRows = 10;
+      const scoreSeed = [
+        [0.98],
+        [0.62, 0.95],
+        [0.49, 0.67, 0.96],
+        [0.42, 0.31, 0.71, 0.97],
+        [0.58, 0.27, 0.36, 0.69, 0.97],
+        [0.54, 0.21, 0.45, 0.29, 0.72, 0.98],
+        [0.57, 0.18, 0.40, 0.33, 0.53, 0.74, 0.98],
+        [0.61, 0.16, 0.38, 0.24, 0.56, 0.35, 0.76, 0.99]
+      ];
+      const tokenScores = [0.95, 0.88, 0.79, 0.73, 0.64, 0.58, 0.52, 0.46, 0.39, 0.35, 0.31, 0.26, 0.21, 0.17, 0.12, 0.08];
+      const state = {
+        mode: "compact",
+        step: 0,
+        focusRow: 7,
+        focusCol: 4,
+        timer: null
+      };
+      const stepText = [
+        "代表头先为每个 Q block 计算 K-block 分数；同组 heads 共享代表头的结果。",
+        "因果约束去掉未来 K blocks；block top-p 再选出累计注意力质量足够的 blocks。",
+        "Token Compacted 模式在已选 block 内只保留高分 K tokens，但仍为全部 128 个 Q tokens 产生输出。",
+        "Kernel 只计算保留列对应的 Q×K pairs；成员 heads 复用 block mask 与 K-token indices。"
+      ];
+
+      function normalizedThresholdCount(scores, threshold, minimum) {
+        const sorted = [...scores].sort((a, b) => b - a);
+        const total = sorted.reduce((sum, value) => sum + Math.exp(value * 3.2), 0);
+        let cumulative = 0;
+        let count = 0;
+        for (const value of sorted) {
+          cumulative += Math.exp(value * 3.2) / total;
+          count += 1;
+          if (cumulative >= threshold && count >= minimum) break;
+        }
+        return Math.max(minimum, count);
+      }
+
+      function selectedColumns(row) {
+        const validScores = scoreSeed[row];
+        const keep = normalizedThresholdCount(validScores, Number(blockTopP.value), Math.min(2, validScores.length));
+        const ranked = validScores
+          .map((score, col) => ({ score, col }))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, keep)
+          .map(item => item.col);
+        if (!ranked.includes(0)) ranked.push(0);
+        if (!ranked.includes(row)) ranked.push(row);
+        return new Set(ranked);
+      }
+
+      function buildBlocks() {
+        blockGrid.innerHTML = "";
+        for (let row = 0; row < size; row += 1) {
+          const selected = selectedColumns(row);
+          for (let col = 0; col < size; col += 1) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "block";
+            const valid = col <= row;
+            button.disabled = !valid;
+            if (valid) button.classList.add("valid");
+            if (selected.has(col) && valid && state.step >= 1) button.classList.add("selected");
+            if (col === 0 && valid && state.step >= 1) button.classList.add("sink");
+            if (col === row && valid && state.step >= 1) button.classList.add("diagonal");
+            if (row === state.focusRow && col === state.focusCol && valid && state.step >= 1) {
+              button.classList.add("focused");
+            }
+            button.setAttribute("aria-label", valid ? `Q block ${row}, K block ${col}, score ${scoreSeed[row][col].toFixed(2)}` : `未来 block，不可见`);
+            if (valid) {
+              const score = document.createElement("span");
+              score.className = "block-score";
+              score.textContent = state.step === 0 ? scoreSeed[row][col].toFixed(2) : "";
+              button.appendChild(score);
+              button.addEventListener("click", () => {
+                state.focusRow = row;
+                state.focusCol = col;
+                render();
+              });
+            }
+            blockGrid.appendChild(button);
+          }
+        }
+      }
+
+      function keptTokenCount() {
+        if (state.mode === "full" || state.step < 2) return tokenCols;
+        return normalizedThresholdCount(tokenScores, Number(tokenTopP.value), 2);
+      }
+
+      function buildPairs() {
+        pairGrid.innerHTML = "";
+        kTokenStrip.innerHTML = "";
+        const kept = keptTokenCount();
+        for (let row = 0; row < tokenRows; row += 1) {
+          for (let col = 0; col < tokenCols; col += 1) {
+            const pair = document.createElement("span");
+            pair.className = "pair";
+            if (col < kept && state.step >= 2) pair.classList.add("on");
+            if (col >= kept && state.step >= 2) pair.classList.add("dimmed");
+            pairGrid.appendChild(pair);
+          }
+        }
+        for (let col = 0; col < tokenCols; col += 1) {
+          const token = document.createElement("span");
+          token.className = "k-token";
+          if (col < kept) token.classList.add("kept");
+          token.textContent = col + 1;
+          kTokenStrip.appendChild(token);
+        }
+      }
+
+      function updateMetrics() {
+        let validBlocks = 0;
+        let selectedBlocks = 0;
+        for (let row = 0; row < size; row += 1) {
+          validBlocks += row + 1;
+          selectedBlocks += selectedColumns(row).size;
+        }
+        const blockKeep = selectedBlocks / validBlocks;
+        const tokenKeep = keptTokenCount() / tokenCols;
+        const pairKeep = state.mode === "full" ? blockKeep : blockKeep * tokenKeep;
+        const compactPairs = 128 * Math.round(128 * tokenKeep);
+        const saving = 1 - tokenKeep;
+
+        app.querySelector("#blockKeep").textContent = `${(blockKeep * 100).toFixed(1)}%`;
+        app.querySelector("#pairKeep").textContent = `${(pairKeep * 100).toFixed(1)}%`;
+        app.querySelector("#relativeCost").textContent = `${pairKeep.toFixed(2)}×`;
+        app.querySelector("#tokenCount").textContent = `保留 ${keptTokenCount()} / ${tokenCols} K tokens`;
+        app.querySelector("#focusedBlockLabel").textContent = `Q${state.focusRow} → K${state.focusCol}`;
+        app.querySelector("#keyBar").style.width = `${tokenKeep * 100}%`;
+        app.querySelector("#queryBar").style.width = `${tokenKeep * 100}%`;
+        app.querySelector("#keyBarLabel").textContent = `${Math.round(128 * tokenKeep)} keys`;
+        app.querySelector("#queryBarLabel").textContent = `${Math.round(128 * tokenKeep)} outputs`;
+        app.querySelector("#compactCostBar").style.width = `${tokenKeep * 100}%`;
+        app.querySelector("#compactPairs").textContent = `${compactPairs.toLocaleString()} pairs`;
+        app.querySelector("#savingBar").style.width = `${saving * 100}%`;
+        app.querySelector("#savingLabel").textContent = `${(saving * 100).toFixed(1)}%`;
+      }
+
+      function updateState() {
+        blockTopPValue.textContent = Number(blockTopP.value).toFixed(2);
+        tokenTopPValue.textContent = Number(tokenTopP.value).toFixed(2);
+        tokenTopP.disabled = state.mode === "full";
+        fullMode.setAttribute("aria-pressed", String(state.mode === "full"));
+        compactMode.setAttribute("aria-pressed", String(state.mode === "compact"));
+        stepCount.textContent = `步骤 ${state.step + 1} / 4`;
+        stateLine.textContent = stepText[state.step];
+      }
+
+      function render() {
+        updateState();
+        buildBlocks();
+        buildPairs();
+        updateMetrics();
+      }
+
+      function stopPlay() {
+        if (state.timer) {
+          window.clearInterval(state.timer);
+          state.timer = null;
+        }
+        playStep.textContent = "自动演示";
+      }
+
+      function moveStep(delta) {
+        state.step = (state.step + delta + 4) % 4;
+        render();
+      }
+
+      fullMode.addEventListener("click", () => {
+        state.mode = "full";
+        render();
+      });
+      compactMode.addEventListener("click", () => {
+        state.mode = "compact";
+        render();
+      });
+      blockTopP.addEventListener("input", render);
+      tokenTopP.addEventListener("input", render);
+      prevStep.addEventListener("click", () => {
+        stopPlay();
+        moveStep(-1);
+      });
+      nextStep.addEventListener("click", () => {
+        stopPlay();
+        moveStep(1);
+      });
+      playStep.addEventListener("click", () => {
+        if (state.timer) {
+          stopPlay();
+          return;
+        }
+        playStep.textContent = "暂停";
+        state.timer = window.setInterval(() => moveStep(1), 1500);
+      });
+
+      render();
+    })();
+  </script>
+</body>
+</html>

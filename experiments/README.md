@@ -13,6 +13,25 @@ Large artifacts are intentionally kept out of version control. In particular,
 `data/`, `outputs/`, model checkpoints, logs, and backup files should not be
 committed.
 
+## Canonical InfiniteBench and AutoBlock workflow
+
+- `run_shareprefill_ae3_infinitebench.py`: main SharePrefill-AE InfiniteBench
+  runner, including Full, Compact, HISA-style, and token-first automatic-block
+  variants.
+- `official_sparse_baselines/run_official_sparse_baseline_benchmark.py`:
+  aligned FlexPrefill and MInference full-generation runner.
+- `baseline_sparsity.py`: final-kernel causal token-pair accounting shared by
+  baseline profiling runs.
+- `aggregate_infinitebench_methods.py`: canonical cross-method InfiniteBench
+  aggregation and comparison entry point.
+- `run_shareprefill_autoencoder_clustering.py`: attention-map autoencoder and
+  offline representative-head grouping.
+- `token_compacted_sparse.py`: token compaction, HISA-style routing, AutoBlock
+  projection, Triton kernels, and detailed selector metrics.
+
+The older Stage-2 runners below remain available for reproducing the historical
+LongBench-v2 experiments.
+
 ## Main Methods
 
 | Method | Entry point | Notes |
