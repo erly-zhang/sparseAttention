@@ -57,6 +57,10 @@ class BaselineSelectorStats:
         self.selected_token_pairs = 0
         self.causal_token_pairs = 0
         self.instrumentation_latency_sec = 0.0
+        self.watched_key_range_stats: dict[str, dict[str, float]] = {}
+        self.layer_watched_key_range_stats: dict[
+            int, dict[str, dict[str, float]]
+        ] = {}
 
     def record(
         self,
@@ -96,7 +100,39 @@ class BaselineSelectorStats:
             "mean_token_pair_keep_ratio": pair_keep,
             "mean_token_pair_sparsity": 1.0 - pair_keep,
             "instrumentation_latency_sec": self.instrumentation_latency_sec,
+            "watched_key_range_stats": {
+                range_name: dict(values)
+                for range_name, values in self.watched_key_range_stats.items()
+            },
+            "layer_watched_key_range_stats": {
+                layer: {
+                    range_name: dict(values)
+                    for range_name, values in ranges.items()
+                }
+                for layer, ranges in self.layer_watched_key_range_stats.items()
+            },
         }
+
+    def record_watched_ranges(
+        self,
+        layer: int,
+        values: Mapping[str, Mapping[str, float]],
+    ) -> None:
+        layer_totals = self.layer_watched_key_range_stats.setdefault(
+            int(layer), {}
+        )
+        for range_name, range_values in values.items():
+            aggregate = self.watched_key_range_stats.setdefault(
+                str(range_name), {}
+            )
+            layer_aggregate = layer_totals.setdefault(str(range_name), {})
+            for name, value in range_values.items():
+                aggregate[str(name)] = aggregate.get(str(name), 0.0) + float(
+                    value
+                )
+                layer_aggregate[str(name)] = layer_aggregate.get(
+                    str(name), 0.0
+                ) + float(value)
 
 
 class BaselineSparsityInstrumentation:
@@ -128,6 +164,10 @@ class BaselineSparsityInstrumentation:
         self._sample: dict[str, Any] | None = None
         self._records: list[dict[str, Any]] = []
         self._pending_stats: list[tuple[Any, Any, Any, Any]] = []
+        self._pending_watched_stats: list[
+            tuple[int, Mapping[str, Mapping[str, Any]]]
+        ] = []
+        self.watched_key_ranges: tuple[tuple[int, int], ...] = ()
         self._selection_events = 0
         self._handles: list[Any] = []
         self._install_layer_context()
@@ -139,6 +179,7 @@ class BaselineSparsityInstrumentation:
     def reset_stats(self) -> None:
         self.stats = BaselineSelectorStats()
         self._pending_stats = []
+        self._pending_watched_stats = []
         self._selection_events = 0
         if self.dump_path is not None:
             self.dump_path.write_text("", encoding="utf-8")
@@ -161,6 +202,7 @@ class BaselineSparsityInstrumentation:
         }
         self._records = []
         self._pending_stats = []
+        self._pending_watched_stats = []
 
     def end_sample(self) -> dict[str, Any]:
         if self._sample is None:
@@ -182,12 +224,14 @@ class BaselineSparsityInstrumentation:
         self._sample = None
         self._records = []
         self._pending_stats = []
+        self._pending_watched_stats = []
         return metadata
 
     def abort_sample(self) -> None:
         self._sample = None
         self._records = []
         self._pending_stats = []
+        self._pending_watched_stats = []
 
     def _append(self, record: dict[str, Any]) -> None:
         if self._sample is not None and self.dump_path is not None:
@@ -221,18 +265,37 @@ class BaselineSparsityInstrumentation:
         return scalar
 
     def flush_stats(self) -> None:
-        if not self._pending_stats:
+        if not self._pending_stats and not self._pending_watched_stats:
             return
         started = time.perf_counter()
-        columns = list(zip(*self._pending_stats))
-        self.stats.record(
-            selected_blocks=self._sum_pending(columns[0]),
-            causal_blocks=self._sum_pending(columns[1]),
-            selected_token_pairs=self._sum_pending(columns[2]),
-            causal_token_pairs=self._sum_pending(columns[3]),
-            instrumentation_latency_sec=time.perf_counter() - started,
-        )
+        if self._pending_stats:
+            columns = list(zip(*self._pending_stats))
+            self.stats.record(
+                selected_blocks=self._sum_pending(columns[0]),
+                causal_blocks=self._sum_pending(columns[1]),
+                selected_token_pairs=self._sum_pending(columns[2]),
+                causal_token_pairs=self._sum_pending(columns[3]),
+                instrumentation_latency_sec=time.perf_counter() - started,
+            )
+        for layer, ranges in self._pending_watched_stats:
+            resolved = {
+                range_name: {
+                    name: float(self._sum_pending([value]))
+                    for name, value in values.items()
+                }
+                for range_name, values in ranges.items()
+            }
+            self.stats.record_watched_ranges(layer, resolved)
         self._pending_stats = []
+        self._pending_watched_stats = []
+
+    def _queue_watched_stats(
+        self,
+        layer: int,
+        values: Mapping[str, Mapping[str, Any]],
+    ) -> None:
+        if self._sample is not None and values:
+            self._pending_watched_stats.append((int(layer), values))
 
     @staticmethod
     def _num_heads(module) -> int:
@@ -312,6 +375,61 @@ class BaselineSparsityInstrumentation:
         counts[diagonal] = q_len[diagonal] * (q_len[diagonal] + 1) // 2
         return counts.sum(), valid.sum()
 
+    @staticmethod
+    def _range_pair_prefix(
+        query_end: torch.Tensor,
+        key_start: torch.Tensor,
+        key_end: torch.Tensor,
+    ) -> torch.Tensor:
+        width = (key_end - key_start).clamp_min(0)
+        steps = (query_end - key_start).clamp_min(0)
+        triangular_steps = torch.minimum(steps, width)
+        triangular = triangular_steps * (triangular_steps + 1) // 2
+        return triangular + (steps - width).clamp_min(0) * width
+
+    @classmethod
+    def _selected_range_pair_count(
+        cls,
+        block_ids: torch.Tensor,
+        *,
+        seq_len: int,
+        block_size: int,
+        watched_start: int,
+        watched_end: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        ids = block_ids.to(torch.int64).reshape(-1)
+        num_blocks = math.ceil(seq_len / block_size)
+        k_block = ids.remainder(num_blocks)
+        first_watched_block = watched_start // block_size
+        last_watched_block = (watched_end - 1) // block_size
+        overlaps = (k_block >= first_watched_block) & (
+            k_block <= last_watched_block
+        )
+        ids = ids[overlaps]
+        k_block = k_block[overlaps]
+        q_block = torch.div(ids, num_blocks, rounding_mode="floor")
+        q_start = q_block * block_size
+        q_end = (q_start + block_size).clamp_max(seq_len)
+        key_start = torch.maximum(
+            k_block * block_size,
+            ids.new_full(ids.shape, int(watched_start)),
+        )
+        key_end = torch.minimum(
+            (k_block + 1) * block_size,
+            ids.new_full(ids.shape, int(watched_end)),
+        ).clamp_max(seq_len)
+        valid_overlap = key_end > key_start
+        q_start = q_start[valid_overlap]
+        q_end = q_end[valid_overlap]
+        key_start = key_start[valid_overlap]
+        key_end = key_end[valid_overlap]
+        selected_slots = (key_end - key_start).sum()
+        selected_pairs = (
+            cls._range_pair_prefix(q_end, key_start, key_end)
+            - cls._range_pair_prefix(q_start, key_start, key_end)
+        ).sum()
+        return selected_slots, selected_pairs
+
     def _install_flexprefill(self) -> None:
         import flex_prefill.ops.flex_prefill_attention as flex_ops
 
@@ -326,7 +444,10 @@ class BaselineSparsityInstrumentation:
                 instrumentation._flex_primitives = {
                     "vertical": v_idx.detach().cpu().to(torch.int32),
                     "slash": s_idx.detach().cpu().to(torch.int32),
-                    "base_blocks": result,
+                    "base_blocks": [
+                        [head_blocks.clone() for head_blocks in batch]
+                        for batch in result
+                    ],
                 }
             return result
 
@@ -347,6 +468,8 @@ class BaselineSparsityInstrumentation:
             extra_rows: list[np.ndarray] = []
             selected_pair_tensors: list[torch.Tensor] = []
             selected_block_tensors: list[torch.Tensor] = []
+            watched_selected_slots: dict[str, list[torch.Tensor]] = {}
+            watched_selected_pairs: dict[str, list[torch.Tensor]] = {}
             for batch_index, batch in enumerate(block_idx):
                 for head_index, head_indices in enumerate(batch):
                     indices = torch.unique(head_indices.to(torch.int64), sorted=True)
@@ -355,6 +478,29 @@ class BaselineSparsityInstrumentation:
                     )
                     selected_pair_tensors.append(pair_count)
                     selected_block_tensors.append(block_count)
+                    for watched_start, watched_end in (
+                        instrumentation.watched_key_ranges
+                    ):
+                        clipped_start = min(int(watched_start), seq_len)
+                        clipped_end = min(int(watched_end), seq_len)
+                        if clipped_end <= clipped_start:
+                            continue
+                        range_name = f"{watched_start}:{watched_end}"
+                        range_slots, range_pairs = (
+                            instrumentation._selected_range_pair_count(
+                                indices,
+                                seq_len=seq_len,
+                                block_size=int(block_size),
+                                watched_start=clipped_start,
+                                watched_end=clipped_end,
+                            )
+                        )
+                        watched_selected_slots.setdefault(
+                            range_name, []
+                        ).append(range_slots)
+                        watched_selected_pairs.setdefault(
+                            range_name, []
+                        ).append(range_pairs)
                     if instrumentation.dump_path is not None:
                         base = torch.unique(
                             base_blocks[batch_index][head_index].to(torch.int64),
@@ -374,6 +520,50 @@ class BaselineSparsityInstrumentation:
                 torch.stack(selected_pair_tensors).sum(),
                 causal_pairs,
             )
+            watched_stats: dict[str, dict[str, Any]] = {}
+            if instrumentation.watched_key_ranges:
+                query_ends = (
+                    torch.arange(
+                        1,
+                        num_blocks + 1,
+                        device=q.device,
+                        dtype=torch.int64,
+                    )
+                    * int(block_size)
+                ).clamp_max(seq_len)
+                for watched_start, watched_end in (
+                    instrumentation.watched_key_ranges
+                ):
+                    clipped_start = min(int(watched_start), seq_len)
+                    clipped_end = min(int(watched_end), seq_len)
+                    if clipped_end <= clipped_start:
+                        continue
+                    range_name = f"{watched_start}:{watched_end}"
+                    valid_slots_per_head = (
+                        torch.minimum(
+                            query_ends,
+                            query_ends.new_full(
+                                query_ends.shape, clipped_end
+                            ),
+                        )
+                        - clipped_start
+                    ).clamp(0, clipped_end - clipped_start).sum()
+                    selector_rows_per_head = (query_ends > clipped_start).sum()
+                    valid_pairs_per_head = instrumentation._valid_range_pairs(
+                        0, seq_len, clipped_start, clipped_end
+                    )
+                    watched_stats[range_name] = {
+                        "selector_rows": selector_rows_per_head * heads,
+                        "valid_token_slots": valid_slots_per_head * heads,
+                        "selected_token_slots": torch.stack(
+                            watched_selected_slots.get(range_name, [])
+                        ).sum(),
+                        "valid_causal_pairs": valid_pairs_per_head * heads,
+                        "selected_causal_pairs": torch.stack(
+                            watched_selected_pairs.get(range_name, [])
+                        ).sum(),
+                    }
+            instrumentation._queue_watched_stats(int(layer), watched_stats)
             if instrumentation.dump_path is None:
                 return block_idx
             extra_offsets, extra_ids = _csr_from_rows(extra_rows)

@@ -32,6 +32,9 @@ from experiments.benchmark_shareprefill_ae3 import (
     validate_input_alignment,
     write_benchmark_summary,
 )
+from experiments.dense_full_query_answer_profiler import (
+    DenseFullQueryAnswerProfiler,
+)
 
 
 TASKS = [
@@ -57,6 +60,7 @@ SHAREPREFILL_METHODS = {
     "shareprefill_ae3_token_block_auto",
     "shareprefill_ae3_token_block_auto_oracle_residual",
     "shareprefill_ae3_token_block_auto_equal_probe",
+    "shareprefill_ae3_token_block_auto_full_query_mean",
     "shareprefill_ae3_token_block_auto_equal_probe_fixed_mass_profile",
     "shareprefill_ae3_token_block_auto_equal_probe_member_vs",
     "shareprefill_ae3_token_block_auto_equal_probe_member_vs_mid8_23",
@@ -97,6 +101,14 @@ ANSWER_DIGIT_LENGTH = {
     "passkey": 5,
     "number_string": 10,
 }
+
+UUID_PATTERN = (
+    r"(?<![0-9a-f])"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+    r"[0-9a-f]{4}-[0-9a-f]{12}"
+    r"(?![0-9a-f])"
+)
+UUID_EXPRESSION = re.compile(UUID_PATTERN, re.IGNORECASE)
 
 
 def _find_subsequence_ranges(
@@ -162,6 +174,66 @@ def build_answer_range_resolver(tokenizer, task: str):
     return resolve
 
 
+def build_kv_retrieval_range_resolver(tokenizer, *, value_only: bool = False):
+    """Locate the queried JSON key/value pair in the final tokenized prompt."""
+
+    def resolve(input_ids: torch.Tensor) -> tuple[tuple[int, int], ...]:
+        values = [int(value) for value in input_ids[0].detach().cpu().tolist()]
+        text = tokenizer.decode(values, skip_special_tokens=False)
+        uuids = UUID_EXPRESSION.findall(text)
+        counts = Counter(value.lower() for value in uuids)
+        repeated = [value for value, count in counts.items() if count >= 2]
+        if len(repeated) != 1:
+            raise RuntimeError(
+                "Expected exactly one repeated UUID identifying the queried "
+                f"KV key, found {len(repeated)} candidates"
+            )
+        queried_key = repeated[0]
+        pair_expression = re.compile(
+            rf'(?i)"{re.escape(queried_key)}"\s*:\s*"'
+            rf'({UUID_PATTERN})"'
+        )
+        pair_matches = list(pair_expression.finditer(text))
+        if len(pair_matches) != 1:
+            raise RuntimeError(
+                "Expected one context key/value pair for queried UUID "
+                f"{queried_key!r}, found {len(pair_matches)}"
+            )
+        pair = pair_matches[0]
+
+        answer_value = pair.group(1)
+        key_ranges = _find_subsequence_ranges(
+            values,
+            tokenizer.encode(queried_key, add_special_tokens=False),
+        )
+        value_ranges = _find_subsequence_ranges(
+            values,
+            tokenizer.encode(answer_value, add_special_tokens=False),
+        )
+        if len(key_ranges) < 2 or not value_ranges:
+            raise RuntimeError(
+                "Could not map the queried key and answer UUIDs back to exact "
+                f"input-token indices: keys={key_ranges}, values={value_ranges}"
+            )
+        context_key = min(key_ranges)
+        following_values = [
+            item
+            for item in value_ranges
+            if item[0] >= context_key[1] and item[0] - context_key[1] <= 16
+        ]
+        if len(following_values) != 1:
+            raise RuntimeError(
+                "Could not uniquely pair the context key with its adjacent "
+                f"value: key={context_key}, values={value_ranges}"
+            )
+        context_value = following_values[0]
+        if value_only:
+            return (context_value,)
+        return ((context_key[0], context_value[1]),)
+
+    return resolve
+
+
 def effective_context_length(config) -> int:
     """Return the validated context after an optional static YaRN extension."""
 
@@ -175,6 +247,18 @@ def effective_context_length(config) -> int:
     )
     factor = float(rope_scaling.get("factor", 1.0))
     return int(original * factor)
+
+
+def install_generation_last_logit_hook(model) -> None:
+    """Avoid materializing prompt-length vocabulary logits during generation."""
+
+    def keep_last_hidden_state(_module, inputs):
+        hidden_states = inputs[0]
+        return (hidden_states[:, -1:, :], *inputs[1:])
+
+    model._dense_last_logit_hook = model.lm_head.register_forward_pre_hook(
+        keep_last_hidden_state
+    )
 
 
 def parse_half_open_range(value: str) -> tuple[int, int]:
@@ -257,7 +341,10 @@ def parse_args() -> argparse.Namespace:
         "--fixed_topk_budget",
         type=int,
         default=8192,
-        help="Shared fixed-TopK target and whole-block key budget.",
+        help=(
+            "Fixed TopK target-token budget and matching final whole-block "
+            "kernel-key budget for fixed-TopK AutoBlock methods."
+        ),
     )
     parser.add_argument(
         "--oracle_residual_tokens",
@@ -338,10 +425,33 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--profile_kv_retrieval_ranges",
+        action="store_true",
+        help=(
+            "Resolve and profile the queried context key/value token range for "
+            "InfiniteBench KV Retrieval."
+        ),
+    )
+    parser.add_argument(
+        "--force_watched_key_range_blocks",
+        action="store_true",
+        help=(
+            "Budget-preserving oracle: force blocks overlapping resolved watched "
+            "ranges, while retaining the existing final whole-block budget."
+        ),
+    )
+    parser.add_argument(
         "--ranked_probability_dump_dir",
         help=(
             "Write one full sorted key-token probability distribution per "
             "layer for the first formal sample."
+        ),
+    )
+    parser.add_argument(
+        "--dense_answer_score_dump_dir",
+        help=(
+            "Profile answer-value scores from full dense Llama attention. "
+            "Requires shareprefill_ae3_full with every layer in --dense_layers."
         ),
     )
     args = parser.parse_args()
@@ -357,9 +467,16 @@ def parse_args() -> argparse.Namespace:
         )
     if args.batch_size != 1:
         raise ValueError("Formal sparse benchmark requires batch_size=1")
+    if args.fixed_topk_budget <= 0:
+        raise ValueError("--fixed_topk_budget must be positive")
     if args.dense_layers and args.method != "shareprefill_ae3_full":
         raise ValueError(
             "--dense_layers is only valid for SharePrefill-AE3 Full"
+        )
+    if args.dense_answer_score_dump_dir and not args.profile_kv_retrieval_ranges:
+        raise ValueError(
+            "--dense_answer_score_dump_dir requires "
+            "--profile_kv_retrieval_ranges"
         )
     configurable_layer_switch_methods = {
         "shareprefill_ae3_token_block_auto_hybrid",
@@ -382,6 +499,25 @@ def parse_args() -> argparse.Namespace:
     ):
         raise ValueError(
             "Member-mask fidelity profiling requires fixed-TopK AutoBlock"
+        )
+    if args.profile_kv_retrieval_ranges and args.task != "kv_retrieval":
+        raise ValueError(
+            "--profile_kv_retrieval_ranges is only valid for KV Retrieval"
+        )
+    if (
+        args.force_watched_key_range_blocks
+        and not args.profile_kv_retrieval_ranges
+    ):
+        raise ValueError(
+            "--force_watched_key_range_blocks requires automatic KV range "
+            "profiling"
+        )
+    if args.force_watched_key_range_blocks and args.method not in {
+        "shareprefill_ae3_token_block_auto",
+        "shareprefill_ae3_token_block_auto_fixed_mass_profile",
+    }:
+        raise ValueError(
+            "The KV oracle requires the fixed-TopK whole-block AutoBlock path"
         )
     return args
 
@@ -550,6 +686,8 @@ def main() -> None:
     model = HFLM(
         **model_kwargs,
     )
+    if args.method == "dense":
+        install_generation_last_logit_hook(model._model)
     configured_context = effective_context_length(model._model.config)
     if args.max_length > configured_context:
         raise ValueError(
@@ -570,11 +708,43 @@ def main() -> None:
         target_token_top_p=args.target_token_top_p,
         target_top_p_start_layer=args.target_top_p_start_layer,
         watched_key_ranges=tuple(args.watched_key_ranges),
+        force_watched_key_range_blocks=args.force_watched_key_range_blocks,
         profile_member_mask_fidelity=args.profile_member_mask_fidelity,
         oracle_residual_tokens=args.oracle_residual_tokens,
         oracle_member_topk_budget=args.oracle_member_topk_budget,
     )
+    method_metadata["dense_generation_last_logit_only"] = (
+        args.method == "dense"
+    )
     model._model = patched_model
+    dense_answer_profiler = None
+    if args.dense_answer_score_dump_dir:
+        num_layers = int(model._model.config.num_hidden_layers)
+        if args.method != "shareprefill_ae3_full" or set(args.dense_layers) != set(
+            range(num_layers)
+        ):
+            raise ValueError(
+                "Dense answer profiling requires shareprefill_ae3_full and all "
+                f"layers 0..{num_layers - 1} in --dense_layers"
+            )
+        if patch is None or not hasattr(patch, "selector"):
+            raise RuntimeError("Dense answer profiling requires a selector carrier")
+        install_generation_last_logit_hook(model._model)
+        method_metadata["dense_generation_last_logit_only"] = True
+        dense_answer_profiler = DenseFullQueryAnswerProfiler(
+            model._model,
+            args.group_config,
+            patch.selector,
+            args.dense_answer_score_dump_dir,
+            topk_budget=args.fixed_topk_budget,
+        )
+        dense_answer_profiler.install()
+        method_metadata["dense_answer_score_profile"] = {
+            "enabled": True,
+            "scope": "AE3 representatives under full dense attention",
+            "query_score_mode": "full_query_causal_logit_mean",
+            "answer_range": "queried_context_value_only",
+        }
 
     # Compile the model and Triton path outside the measured benchmark calls.
     warmup = model.tokenizer(
@@ -608,11 +778,20 @@ def main() -> None:
             )
 
     metrics_path = output_dir / "online_metrics.jsonl"
-    watched_range_resolver = (
-        build_answer_range_resolver(model.tokenizer, args.task)
-        if args.profile_member_mask_fidelity and args.task in ANSWER_DIGIT_LENGTH
-        else None
-    )
+    if args.profile_kv_retrieval_ranges:
+        watched_range_resolver = build_kv_retrieval_range_resolver(
+            model.tokenizer,
+            value_only=dense_answer_profiler is not None,
+        )
+    elif (
+        args.profile_member_mask_fidelity
+        and args.task in ANSWER_DIGIT_LENGTH
+    ):
+        watched_range_resolver = build_answer_range_resolver(
+            model.tokenizer, args.task
+        )
+    else:
+        watched_range_resolver = None
     recorder = GenerationMetricsRecorder(
         model._model,
         patch,
@@ -650,6 +829,9 @@ def main() -> None:
         fewshot_random_seed=args.seed,
     )
     recorder.uninstall()
+    if dense_answer_profiler is not None:
+        dense_answer_profiler.uninstall()
+        dense_answer_profiler.finalize(recorder.rows)
     if args.create_reference:
         alignment = {"status": "reference_created", "count": len(recorder.rows)}
     elif args.method != "shareprefill_ae3_full" or args.reference_metrics:

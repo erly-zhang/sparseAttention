@@ -55,12 +55,6 @@ SHAREPREFILL_METHODS = {
     "shareprefill_ae3_token_block64",
     "shareprefill_ae3_token_block128",
     "shareprefill_ae3_token_block_auto",
-    "shareprefill_ae3_token_block_auto_oracle_residual",
-    "shareprefill_ae3_token_block_auto_equal_probe",
-    "shareprefill_ae3_token_block_auto_equal_probe_fixed_mass_profile",
-    "shareprefill_ae3_token_block_auto_equal_probe_member_vs",
-    "shareprefill_ae3_token_block_auto_equal_probe_member_vs_mid8_23",
-    "shareprefill_ae3_token_block_auto_topp_member_vs",
     "shareprefill_ae8_token_block_auto",
     "shareprefill_ae3_token_block_auto_topp",
     "shareprefill_ae3_token_block_auto_topp_matched",
@@ -74,6 +68,8 @@ SHAREPREFILL_METHODS = {
     "shareprefill_ae3_token_block_auto_dense_topp_mass",
     "shareprefill_per_head_token_topk",
     "shareprefill_ae3_representative_token_topk",
+    "shareprefill_ae3_representative_token_topk_protected",
+    "shareprefill_ae3_token_block_auto_target_protected",
     "shareprefill_per_head_token_block_auto",
 }
 
@@ -177,6 +173,18 @@ def effective_context_length(config) -> int:
     return int(original * factor)
 
 
+def install_generation_last_logit_hook(model) -> None:
+    """Avoid materializing prompt-length vocabulary logits during generation."""
+
+    def keep_last_hidden_state(_module, inputs):
+        hidden_states = inputs[0]
+        return (hidden_states[:, -1:, :], *inputs[1:])
+
+    model._dense_last_logit_hook = model.lm_head.register_forward_pre_hook(
+        keep_last_hidden_state
+    )
+
+
 def parse_half_open_range(value: str) -> tuple[int, int]:
     try:
         start_text, end_text = value.split(":", 1)
@@ -252,28 +260,6 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=2.0,
         help="F-beta used by the AutoBlock F-beta block selector.",
-    )
-    parser.add_argument(
-        "--fixed_topk_budget",
-        type=int,
-        default=8192,
-        help="Shared fixed-TopK target and whole-block key budget.",
-    )
-    parser.add_argument(
-        "--oracle_residual_tokens",
-        type=int,
-        default=0,
-        help="Exact member-head residual tokens per non-representative row.",
-    )
-    parser.add_argument(
-        "--oracle_member_topk_budget",
-        type=int,
-        default=8192,
-        help="Member-head dense TopK reference budget used for recall metrics.",
-    )
-    parser.add_argument(
-        "--oracle_residual_dump_dir",
-        help="Write sampled shared, residual, member-TopK, and final masks.",
     )
     parser.add_argument(
         "--target_token_top_p",
@@ -391,11 +377,6 @@ def main() -> None:
     ranked_probability_dump_dir = (
         Path(args.ranked_probability_dump_dir).resolve()
         if args.ranked_probability_dump_dir
-        else None
-    )
-    oracle_residual_dump_dir = (
-        Path(args.oracle_residual_dump_dir).resolve()
-        if args.oracle_residual_dump_dir
         else None
     )
     ranked_input_saved = False
@@ -550,6 +531,8 @@ def main() -> None:
     model = HFLM(
         **model_kwargs,
     )
+    if args.method == "dense":
+        install_generation_last_logit_hook(model._model)
     configured_context = effective_context_length(model._model.config)
     if args.max_length > configured_context:
         raise ValueError(
@@ -566,14 +549,26 @@ def main() -> None:
         selector_dump_path=selector_dump_path,
         record_sparsity=args.record_sparsity or args.dump_selector_details,
         block_f_beta=args.block_f_beta,
-        fixed_topk_budget=args.fixed_topk_budget,
         target_token_top_p=args.target_token_top_p,
         target_top_p_start_layer=args.target_top_p_start_layer,
         watched_key_ranges=tuple(args.watched_key_ranges),
         profile_member_mask_fidelity=args.profile_member_mask_fidelity,
-        oracle_residual_tokens=args.oracle_residual_tokens,
-        oracle_member_topk_budget=args.oracle_member_topk_budget,
     )
+    method_metadata["dense_generation_last_logit_only"] = (
+        args.method == "dense"
+    )
+    if (
+        selector_dump_path is not None
+        and patch is not None
+        and hasattr(patch, "selector")
+        and not hasattr(patch, "begin_sample")
+    ):
+        from experiments.token_selector_dump import (
+            install_token_compacted_selector_dump,
+        )
+
+        install_token_compacted_selector_dump(patch, selector_dump_path)
+        method_metadata["selector_dump"] = str(selector_dump_path)
     model._model = patched_model
 
     # Compile the model and Triton path outside the measured benchmark calls.
@@ -588,14 +583,6 @@ def main() -> None:
     )
     if patch is not None and hasattr(patch, "selector"):
         patch.selector.stats = type(patch.selector.stats)()
-        if oracle_residual_dump_dir is not None:
-            if not hasattr(patch.selector, "configure_oracle_residual_dump"):
-                raise RuntimeError(
-                    "The selected method does not support oracle residual dumps"
-                )
-            patch.selector.configure_oracle_residual_dump(
-                oracle_residual_dump_dir, sample_limit=1
-            )
         if ranked_probability_dump_dir is not None:
             if not hasattr(
                 patch.selector, "configure_ranked_probability_dump"
