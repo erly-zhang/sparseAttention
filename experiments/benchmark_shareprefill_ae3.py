@@ -46,6 +46,10 @@ METHODS = (
     "shareprefill_ae3_token_block_auto_oracle_residual",
     "shareprefill_ae3_token_block_auto_equal_probe",
     "shareprefill_ae3_token_block_auto_full_query_mean",
+    "shareprefill_ae3_token_block_auto_tile_sum_tail1024",
+    "shareprefill_ae3_token_block_auto_tile_sum_tail1024_topp",
+    "shareprefill_ae3_token_compact",
+    "shareprefill_per_head_token_compact",
     "shareprefill_ae3_token_block_auto_equal_probe_fixed_mass_profile",
     "shareprefill_ae3_token_block_auto_equal_probe_member_vs",
     "shareprefill_ae3_token_block_auto_equal_probe_member_vs_mid8_23",
@@ -398,6 +402,8 @@ def install_shareprefill_ae3_token_block_cover(
     residual_mode: str = "none",
     oracle_residual_tokens: int = 0,
     oracle_member_topk_budget: int = 8192,
+    use_torch_kernel: bool = False,
+    head_chunk_size: int = 4,
 ):
     """Install token-first selection followed by whole-K-block coverage."""
 
@@ -463,6 +469,8 @@ def install_shareprefill_ae3_token_block_cover(
         residual_mode=residual_mode,
         oracle_residual_tokens=oracle_residual_tokens,
         oracle_member_topk_budget=oracle_member_topk_budget,
+        use_torch_kernel=use_torch_kernel,
+        head_chunk_size=head_chunk_size,
     )
     return patch, config
 
@@ -588,6 +596,56 @@ def install_benchmark_method(
             ),
         }
     if method in {
+        "shareprefill_ae3_token_compact",
+        "shareprefill_per_head_token_compact",
+    }:
+        per_head = method == "shareprefill_per_head_token_compact"
+        patch, config = install_shareprefill_ae3_token_block_cover(
+            model,
+            logical_key_block_size=(32, 64, 128),
+            group_config_path=group_config_path,
+            flexprefill_root=flexprefill_root,
+            target_token_budget=int(fixed_topk_budget),
+            target_token_top_p=None,
+            target_token_min_budget=None,
+            final_token_budget=int(fixed_topk_budget),
+            maximum_selected_blocks=None,
+            fill_final_token_budget=False,
+            minimum_block_coverage_ratio=0.125,
+            query_score_mode="tile_sum_plus_tail1024",
+            probe_weights=(0.2, 0.3, 0.4, 0.1),
+            project_target_to_blocks=False,
+            per_head_selection=per_head,
+            head_chunk_size=1 if per_head else 4,
+            use_torch_kernel=False,
+        )
+        return model, patch, {
+            "implementation": (
+                "shareprefill_per_head_fixed_topk_token_compact"
+                if per_head
+                else "shareprefill_ae_k3_token_first_fixed_topk_token_compact"
+            ),
+            "model": model_name,
+            "group_config_path": str(group_config_path),
+            "classification_metric": config.get("classification_metric"),
+            "online_config": {
+                "selection_mode": (
+                    "per_head_token_compact"
+                    if per_head
+                    else "token_first_token_compact"
+                ),
+                "target_selection": "fixed_top_k",
+                "target_token_budget": int(fixed_topk_budget),
+                "final_token_budget": int(fixed_topk_budget),
+                "query_score_mode": "tile_sum_plus_tail1024",
+                "block_projection": False,
+                "compact_attention": True,
+                "per_head_selection": per_head,
+                "use_torch_kernel": False,
+                "query_chunk_size": 128,
+            },
+        }
+    if method in {
         "shareprefill_ae3_compact",
         "shareprefill_ae3_hisa",
         "shareprefill_ae3_hisa_mass",
@@ -598,6 +656,8 @@ def install_benchmark_method(
         "shareprefill_ae3_token_block_auto_oracle_residual",
         "shareprefill_ae3_token_block_auto_equal_probe",
         "shareprefill_ae3_token_block_auto_full_query_mean",
+        "shareprefill_ae3_token_block_auto_tile_sum_tail1024",
+        "shareprefill_ae3_token_block_auto_tile_sum_tail1024_topp",
         "shareprefill_ae3_token_block_auto_equal_probe_fixed_mass_profile",
         "shareprefill_ae3_token_block_auto_equal_probe_member_vs",
         "shareprefill_ae3_token_block_auto_equal_probe_member_vs_mid8_23",
@@ -876,6 +936,7 @@ def install_benchmark_method(
                 "auto_hybrid",
                 "auto_hybrid_fixed10_topp90",
                 "auto_dense_topp_mass",
+                "auto_tile_sum_tail1024_topp",
             }
             equal_probe_topk = block_suffix in {
                 "auto_equal_probe",
@@ -884,6 +945,10 @@ def install_benchmark_method(
                 "auto_equal_probe_member_vs_mid8_23",
             }
             full_query_mean = block_suffix == "auto_full_query_mean"
+            tile_tail1024 = block_suffix in {
+                "auto_tile_sum_tail1024",
+                "auto_tile_sum_tail1024_topp",
+            }
             member_vertical_slash = block_suffix in {
                 "auto_equal_probe_member_vs",
                 "auto_equal_probe_member_vs_mid8_23",
@@ -941,6 +1006,8 @@ def install_benchmark_method(
                 "auto_oracle_residual",
                 "auto_equal_probe",
                 "auto_full_query_mean",
+                "auto_tile_sum_tail1024",
+                "auto_tile_sum_tail1024_topp",
                 "auto_equal_probe_fixed_mass_profile",
                 "auto_equal_probe_member_vs",
                 "auto_equal_probe_member_vs_mid8_23",
@@ -1005,7 +1072,9 @@ def install_benchmark_method(
                 block_f_beta=block_f_beta if fbeta_selection else None,
                 measure_fixed_target_probability_mass=fixed_mass_profile,
                 query_score_mode=(
-                    "full_query_mean"
+                    "tile_sum_plus_tail1024"
+                    if tile_tail1024
+                    else "full_query_mean"
                     if full_query_mean
                     else "four_probe_weighted"
                 ),
@@ -1047,6 +1116,8 @@ def install_benchmark_method(
                 "implementation": (
                     "shareprefill_ae_k3_token_first_block_cover_plus_exact_member_oracle_residual"
                     if oracle_residual
+                    else "shareprefill_ae_k3_token_first_tile_sum_plus_tail1024_block_cover"
+                    if tile_tail1024
                     else "shareprefill_ae_k3_token_first_full_query_mean_block_cover"
                     if full_query_mean
                     else "shareprefill_ae_k3_dense_prefix_then_probability_top_p_cost_aware_block_cover"
@@ -1290,23 +1361,29 @@ def install_benchmark_method(
                         }
                     ),
                     "query_score_mode": (
-                        "full_query_causal_logit_mean"
+                        "tile_sum_plus_tail1024"
+                        if tile_tail1024
+                        else "full_query_causal_logit_mean"
                         if full_query_mean
                         else "four_probe_weighted"
                     ),
                     "query_probes": (
-                        ["all_legal_query_tokens_in_tile"]
+                        ["tile_all_causal_query_tokens_sum", "global_last_1024_query_mean"]
+                        if tile_tail1024
+                        else ["all_legal_query_tokens_in_tile"]
                         if full_query_mean
                         else ["one_third", "two_thirds", "last", "mean"]
                     ),
                     "probe_aggregation": (
-                        "exact_arithmetic_mean_over_causally_legal_query_logits"
+                        "tile_sum_plus_tail1024_mean"
+                        if tile_tail1024
+                        else "exact_arithmetic_mean_over_causally_legal_query_logits"
                         if full_query_mean
                         else "weighted_average"
                     ),
                     "probe_weights": (
                         None
-                        if full_query_mean
+                        if full_query_mean or tile_tail1024
                         else {
                             "one_third": configured_probe_weights[0],
                             "two_thirds": configured_probe_weights[1],

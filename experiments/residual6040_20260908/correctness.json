@@ -1,0 +1,82 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "length": 1,
+      "gqa_contiguous_and_interleaved": true,
+      "both_methods": true
+    },
+    {
+      "length": 127,
+      "gqa_contiguous_and_interleaved": true,
+      "both_methods": true
+    },
+    {
+      "length": 128,
+      "gqa_contiguous_and_interleaved": true,
+      "both_methods": true
+    },
+    {
+      "length": 129,
+      "gqa_contiguous_and_interleaved": true,
+      "both_methods": true
+    },
+    {
+      "length": 255,
+      "gqa_contiguous_and_interleaved": true,
+      "both_methods": true
+    },
+    {
+      "length": 257,
+      "gqa_contiguous_and_interleaved": true,
+      "both_methods": true
+    },
+    {
+      "length": 511,
+      "gqa_contiguous_and_interleaved": true,
+      "both_methods": true
+    },
+    {
+      "length": 512,
+      "gqa_contiguous_and_interleaved": true,
+      "both_methods": true
+    },
+    {
+      "length": 513,
+      "gqa_contiguous_and_interleaved": true,
+      "both_methods": true
+    },
+    {
+      "length": 641,
+      "gqa_contiguous_and_interleaved": true,
+      "both_methods": true
+    }
+  ],
+  "relative_l2_limit": 0.005,
+  "absolute_limit": 0.02,
+  "max_relative_l2": 0.0020092884078621864,
+  "max_absolute": 0.00960540771484375,
+  "max_member2q_probability_error": 1.341104507446289e-07,
+  "original_vs_optimized_index_kernel_bitwise_equal": true,
+  "cross_gpu_mask_equal": true,
+  "random_mask_sha256": "06930043d2a0029d23e2f9077ca6ab7caae95d9f987d070a4067c44a2ef449b3",
+  "unit_uniformity_histogram": [
+    24,
+    29,
+    31,
+    35,
+    30,
+    28,
+    37,
+    42,
+    29,
+    33,
+    30,
+    35,
+    32,
+    31,
+    33,
+    33
+  ],
+  "no_attention_kernel_modification": true
+}

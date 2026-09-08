@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "kind": "fixed",
+      "budget_and_unique_and_causal": "passed",
+      "max_kernel_relative_error": 0.0019896819721907377
+    },
+    {
+      "kind": "topp",
+      "budget_and_unique_and_causal": "passed",
+      "max_kernel_relative_error": 0.0019870148971676826
+    }
+  ]
+}

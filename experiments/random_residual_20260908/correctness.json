@@ -1,0 +1,70 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "n": 1,
+      "invariants_and_independent_kernel": "passed"
+    },
+    {
+      "n": 127,
+      "invariants_and_independent_kernel": "passed"
+    },
+    {
+      "n": 128,
+      "invariants_and_independent_kernel": "passed"
+    },
+    {
+      "n": 129,
+      "invariants_and_independent_kernel": "passed"
+    },
+    {
+      "n": 255,
+      "invariants_and_independent_kernel": "passed"
+    },
+    {
+      "n": 256,
+      "invariants_and_independent_kernel": "passed"
+    },
+    {
+      "n": 257,
+      "invariants_and_independent_kernel": "passed"
+    },
+    {
+      "n": 383,
+      "invariants_and_independent_kernel": "passed"
+    },
+    {
+      "n": 384,
+      "invariants_and_independent_kernel": "passed"
+    },
+    {
+      "n": 385,
+      "invariants_and_independent_kernel": "passed"
+    },
+    {
+      "n": 513,
+      "invariants_and_independent_kernel": "passed"
+    }
+  ],
+  "actual_budget_cross_gpu_reproducible": true,
+  "mask_sha256": "e3cfd91affd82f8c30d1abdbf957b467c5965074b6a7c63eb4aa04c115cc18f7",
+  "first_draw_histogram_16bins_512_unit_streams": [
+    33,
+    31,
+    34,
+    26,
+    34,
+    30,
+    38,
+    27,
+    36,
+    44,
+    29,
+    29,
+    21,
+    40,
+    30,
+    30
+  ],
+  "independent_kernel_relative_tolerance": 0.005
+}

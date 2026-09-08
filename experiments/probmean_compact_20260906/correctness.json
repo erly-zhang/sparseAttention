@@ -1,0 +1,116 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "n": 1,
+      "head": 0,
+      "max_probability_error": 0.0
+    },
+    {
+      "n": 1,
+      "head": 3,
+      "max_probability_error": 0.0
+    },
+    {
+      "n": 1,
+      "head": 4,
+      "max_probability_error": 0.0
+    },
+    {
+      "n": 1,
+      "head": 7,
+      "max_probability_error": 0.0
+    },
+    {
+      "n": 127,
+      "head": 0,
+      "max_probability_error": 5.587935447692871e-09
+    },
+    {
+      "n": 127,
+      "head": 3,
+      "max_probability_error": 7.450580596923828e-09
+    },
+    {
+      "n": 127,
+      "head": 4,
+      "max_probability_error": 3.725290298461914e-09
+    },
+    {
+      "n": 127,
+      "head": 7,
+      "max_probability_error": 3.725290298461914e-09
+    },
+    {
+      "n": 128,
+      "head": 0,
+      "max_probability_error": 7.450580596923828e-09
+    },
+    {
+      "n": 128,
+      "head": 3,
+      "max_probability_error": 3.725290298461914e-09
+    },
+    {
+      "n": 128,
+      "head": 4,
+      "max_probability_error": 3.725290298461914e-09
+    },
+    {
+      "n": 128,
+      "head": 7,
+      "max_probability_error": 7.450580596923828e-09
+    },
+    {
+      "n": 129,
+      "head": 0,
+      "max_probability_error": 1.1175870895385742e-08
+    },
+    {
+      "n": 129,
+      "head": 3,
+      "max_probability_error": 2.60770320892334e-08
+    },
+    {
+      "n": 129,
+      "head": 4,
+      "max_probability_error": 1.4901161193847656e-08
+    },
+    {
+      "n": 129,
+      "head": 7,
+      "max_probability_error": 2.9802322387695312e-08
+    },
+    {
+      "n": 385,
+      "head": 0,
+      "max_probability_error": 7.450580596923828e-09
+    },
+    {
+      "n": 385,
+      "head": 3,
+      "max_probability_error": 1.4901161193847656e-08
+    },
+    {
+      "n": 385,
+      "head": 4,
+      "max_probability_error": 1.862645149230957e-08
+    },
+    {
+      "n": 385,
+      "head": 7,
+      "max_probability_error": 2.2351741790771484e-08
+    },
+    {
+      "per_head": false,
+      "kernel": "PASS"
+    },
+    {
+      "per_head": true,
+      "kernel": "PASS"
+    },
+    {
+      "topp_unbounded_and_minimum": "PASS"
+    }
+  ]
+}

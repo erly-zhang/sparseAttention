@@ -1527,19 +1527,32 @@ def _cover_target_mask_with_key_blocks(
         & valid_key_tokens.view(1, 1, 1, num_key_blocks, key_block_size)
     ).flatten(start_dim=-2)[..., :seq_len]
     selected_mask &= causal_tokens
-    covered_target_tokens = (target_mask & selected_mask).sum(
-        -1, dtype=torch.int64
+    # Chunked reductions avoid materializing a full-size int64/float32
+    # intermediate for `bool.sum(dtype=torch.int64)` / `torch.where(...)`.
+    # The monolithic versions were the source of the L40S OOM (2.7 GiB spike).
+    reduce_chunk = 8192
+    covered_target_tokens = torch.zeros(
+        target_mask.shape[:-1], dtype=torch.int64, device=target_mask.device
     )
+    for chunk_start in range(0, seq_len, reduce_chunk):
+        chunk_end = min(chunk_start + reduce_chunk, seq_len)
+        covered_target_tokens += (
+            target_mask[..., chunk_start:chunk_end]
+            & selected_mask[..., chunk_start:chunk_end]
+        ).sum(-1, dtype=torch.int64)
     if target_probabilities is None:
         covered_target_probability_mass = covered_target_tokens.to(torch.float32)
     else:
-        covered_target_probability_mass = (
-            torch.where(
-                selected_mask,
-                target_probabilities,
-                torch.zeros_like(target_probabilities),
-            )
-        ).sum(-1, dtype=torch.float32)
+        covered_target_probability_mass = torch.zeros(
+            target_mask.shape[:-1], dtype=torch.float32, device=target_mask.device
+        )
+        for chunk_start in range(0, seq_len, reduce_chunk):
+            chunk_end = min(chunk_start + reduce_chunk, seq_len)
+            covered_target_probability_mass += torch.where(
+                selected_mask[..., chunk_start:chunk_end],
+                target_probabilities[..., chunk_start:chunk_end],
+                torch.zeros_like(target_probabilities[..., chunk_start:chunk_end]),
+            ).sum(-1, dtype=torch.float32)
     selected_block_counts = selected_key_blocks.sum(-1, dtype=torch.int64)
     causal_block_counts = causal_key_blocks.sum(-1, dtype=torch.int64).view(
         1, 1, num_query_blocks
@@ -1783,10 +1796,14 @@ class RepresentativeTokenFirstBlockSelector:
             raise ValueError(
                 "adaptive_kernel_cost_tolerance must be in [0, 1]"
             )
-        if query_score_mode not in {"four_probe_weighted", "full_query_mean"}:
+        if query_score_mode not in {
+            "four_probe_weighted",
+            "full_query_mean",
+            "tile_sum_plus_tail1024",
+        }:
             raise ValueError(
                 "query_score_mode must be 'four_probe_weighted' or "
-                "'full_query_mean'"
+                "'full_query_mean' or 'tile_sum_plus_tail1024'"
             )
         if len(probe_weights) != 4 or any(weight < 0 for weight in probe_weights):
             raise ValueError("probe_weights must contain four non-negative values")
@@ -1955,6 +1972,75 @@ class RepresentativeTokenFirstBlockSelector:
                     probe_scores, alpha=self.probe_weights[probe_idx]
                 )
             return token_scores, query_starts, query_ends, query_lengths
+
+        if self.query_score_mode == "tile_sum_plus_tail1024":
+            # For keys before a tile, the tile contribution is the raw sum of
+            # all causally legal query logits in that tile. pooled_q is the
+            # valid-token mean, so multiply by the number of valid queries.
+            token_scores.mul_(query_lengths.view(1, 1, num_query_blocks, 1))
+
+            padded_seq_len = num_query_blocks * block_size
+            pad_tokens = padded_seq_len - seq_len
+            if pad_tokens:
+                representative_q_padded = torch.nn.functional.pad(
+                    representative_q, (0, 0, 0, 0, 0, pad_tokens)
+                )
+                representative_k_padded = torch.nn.functional.pad(
+                    representative_k, (0, 0, 0, 0, 0, pad_tokens)
+                )
+            else:
+                representative_q_padded = representative_q
+                representative_k_padded = representative_k
+
+            query_blocks = representative_q_padded.view(
+                batch_size, num_query_blocks, block_size, num_groups, head_dim
+            )
+            key_blocks = representative_k_padded.view(
+                batch_size, num_query_blocks, block_size, num_groups, head_dim
+            )
+            positions = torch.arange(
+                padded_seq_len, device=representative_q.device
+            ).view(num_query_blocks, block_size)
+            valid_positions = positions < seq_len
+
+            reversed_queries = torch.flip(
+                query_blocks.to(torch.float32), dims=(2,)
+            )
+            suffix_sums = torch.flip(
+                torch.cumsum(reversed_queries, dim=2), dims=(2,)
+            )
+            diagonal_scores = torch.einsum(
+                "bqphd,bqphd->bhqp",
+                suffix_sums.to(representative_k.dtype),
+                key_blocks,
+            ) / math.sqrt(head_dim)
+            diagonal_scores.masked_fill_(
+                ~valid_positions.view(1, 1, num_query_blocks, block_size),
+                float("-inf"),
+            )
+
+            if pad_tokens:
+                token_scores = torch.nn.functional.pad(
+                    token_scores, (0, pad_tokens), value=float("-inf")
+                )
+            diagonal_indices = positions.view(
+                1, 1, num_query_blocks, block_size
+            ).expand(batch_size, num_groups, -1, -1)
+            token_scores.scatter_(-1, diagonal_indices, diagonal_scores)
+
+            tail_start = max(0, seq_len - 1024)
+            tail_query = representative_q[:, tail_start:].mean(dim=1)
+            tail_scores = torch.einsum(
+                "bhd,bthd->bht", tail_query, representative_k
+            ) / math.sqrt(head_dim)
+            token_scores = token_scores[..., :seq_len].to(torch.float32)
+            token_scores.add_(tail_scores.to(torch.float32).unsqueeze(2))
+            return (
+                token_scores,
+                query_starts,
+                query_ends,
+                query_lengths,
+            )
 
         # For keys preceding a tile, mean(Q) @ K exactly equals the arithmetic
         # mean of every query-token QK logit. Inside the diagonal tile, a key is
@@ -4152,6 +4238,85 @@ def triton_token_compacted_prefill_attention(
     return output
 
 
+def token_compacted_prefill_attention_torch(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    index: TokenCompactedIndex,
+    *,
+    softmax_scale: Optional[float] = None,
+    gqa_interleave: bool = False,
+) -> torch.Tensor:
+    """PyTorch reference for token-compacted causal prefill.
+
+    Mirrors ``_token_compacted_prefill_kernel``: gather only the selected K/V
+    tokens, then compute QK/PV with a causal mask on ORIGINAL token positions.
+    This is a correctness reference (not a fast kernel) and assumes
+    ``batch_size == 1``, which is what the InfiniteBench runner uses.
+    """
+    batch_size, q_len, num_q_heads, head_dim = q.shape
+    _, k_len, num_kv_heads, _ = k.shape
+    if batch_size != 1:
+        raise ValueError("token-compacted PyTorch reference requires batch_size=1")
+    if num_q_heads % num_kv_heads:
+        raise ValueError("Query heads must be divisible by KV heads")
+    num_share_q_heads = num_q_heads // num_kv_heads
+    scale = 1.0 / math.sqrt(head_dim) if softmax_scale is None else softmax_scale
+
+    num_groups = index.num_groups
+    num_query_blocks = index.num_query_blocks
+    query_block_size = index.query_block_size
+    row_starts = index.row_starts.view(num_groups, num_query_blocks)
+    row_ends = index.row_ends.view(num_groups, num_query_blocks)
+    token_indices = index.token_indices
+    head_to_group = index.head_to_group
+
+    if gqa_interleave:
+        kv_head_of_group = torch.arange(num_groups, device=q.device) % num_kv_heads
+    else:
+        kv_head_of_group = (
+            torch.arange(num_groups, device=q.device) // num_share_q_heads
+        )
+
+    group_heads: list[list[int]] = [[] for _ in range(num_groups)]
+    for head in range(num_q_heads):
+        group_heads[int(head_to_group[head])].append(head)
+
+    output = torch.zeros_like(q)
+    q_b = q[0]
+    k_b = k[0]
+    v_b = v[0]
+
+    for group in range(num_groups):
+        kv_head = int(kv_head_of_group[group])
+        heads = group_heads[group]
+        if not heads:
+            continue
+        k_g = k_b[:, kv_head, :]
+        v_g = v_b[:, kv_head, :]
+        q_heads = q_b[:, heads, :]
+        for qb in range(num_query_blocks):
+            start = int(row_starts[group, qb])
+            end = int(row_ends[group, qb])
+            if end <= start:
+                continue
+            ids = token_indices[start:end]
+            q_start = qb * query_block_size
+            q_end = min(q_start + query_block_size, q_len)
+            q_tile = q_heads[q_start:q_end]
+            k_sparse = k_g[ids]
+            v_sparse = v_g[ids]
+            scores = torch.einsum("qhd,kd->hqk", q_tile, k_sparse) * scale
+            query_pos = torch.arange(q_start, q_end, device=q.device)
+            causal = query_pos[:, None] >= ids[None, :]
+            scores = scores.masked_fill(~causal[None, :, :], float("-inf"))
+            probs = torch.softmax(scores, dim=-1, dtype=torch.float32)
+            probs = torch.nan_to_num(probs, nan=0.0).to(q.dtype)
+            out_tile = torch.einsum("hqk,kd->hqd", probs, v_sparse)
+            output[0, q_start:q_end, heads, :] = out_tile.transpose(0, 1)
+    return output
+
+
 @dataclass
 class TokenCompactedFlexPrefillPatch:
     selector: Any
@@ -4220,6 +4385,8 @@ def install_grouped_token_compacted_flexprefill(
     oracle_residual_tokens: int = 0,
     oracle_member_topk_budget: int = 8192,
     oracle_head_chunk_size: int = 4,
+    use_torch_kernel: bool = False,
+    head_chunk_size: int = 4,
 ) -> TokenCompactedFlexPrefillPatch:
     """Patch long prefill with block-selected, token-compacted attention."""
 
@@ -4361,7 +4528,7 @@ def install_grouped_token_compacted_flexprefill(
             selector = ChunkedPerHeadTokenFirstSelector(
                 group_config,
                 num_q_heads=int(model.config.num_attention_heads),
-                head_chunk_size=4,
+                head_chunk_size=head_chunk_size,
                 **selector_kwargs,
             )
         else:
@@ -4392,15 +4559,25 @@ def install_grouped_token_compacted_flexprefill(
             timing_start = torch.cuda.Event(enable_timing=True)
             timing_end = torch.cuda.Event(enable_timing=True)
             timing_start.record()
-            output = triton_token_compacted_prefill_attention(
-                q,
-                k,
-                v,
-                block_idx,
-                token_chunk_size=token_chunk_size,
-                softmax_scale=softmax_scale,
-                gqa_interleave=gqa_interleave,
-            )
+            if use_torch_kernel:
+                output = token_compacted_prefill_attention_torch(
+                    q,
+                    k,
+                    v,
+                    block_idx,
+                    softmax_scale=softmax_scale,
+                    gqa_interleave=gqa_interleave,
+                )
+            else:
+                output = triton_token_compacted_prefill_attention(
+                    q,
+                    k,
+                    v,
+                    block_idx,
+                    token_chunk_size=token_chunk_size,
+                    softmax_scale=softmax_scale,
+                    gqa_interleave=gqa_interleave,
+                )
             timing_end.record()
             selector.stats.record_kernel_events(timing_start, timing_end)
             return output

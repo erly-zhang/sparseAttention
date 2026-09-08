@@ -55,6 +55,10 @@ SHAREPREFILL_METHODS = {
     "shareprefill_ae3_token_block64",
     "shareprefill_ae3_token_block128",
     "shareprefill_ae3_token_block_auto",
+    "shareprefill_ae3_token_block_auto_tile_sum_tail1024",
+    "shareprefill_ae3_token_block_auto_tile_sum_tail1024_topp",
+    "shareprefill_ae3_token_compact",
+    "shareprefill_per_head_token_compact",
     "shareprefill_ae8_token_block_auto",
     "shareprefill_ae3_token_block_auto_topp",
     "shareprefill_ae3_token_block_auto_topp_matched",
@@ -260,6 +264,15 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=2.0,
         help="F-beta used by the AutoBlock F-beta block selector.",
+    )
+    parser.add_argument(
+        "--fixed_topk_budget",
+        type=int,
+        default=8192,
+        help=(
+            "Override the fixed TopK token budget used by fixed-top-k AutoBlock "
+            "methods (target_token_budget and final_whole_block_token_budget)."
+        ),
     )
     parser.add_argument(
         "--target_token_top_p",
@@ -549,6 +562,7 @@ def main() -> None:
         selector_dump_path=selector_dump_path,
         record_sparsity=args.record_sparsity or args.dump_selector_details,
         block_f_beta=args.block_f_beta,
+        fixed_topk_budget=args.fixed_topk_budget,
         target_token_top_p=args.target_token_top_p,
         target_top_p_start_layer=args.target_top_p_start_layer,
         watched_key_ranges=tuple(args.watched_key_ranges),
