@@ -1,14 +1,31 @@
 # SparseAttention
 
-SparseAttention contains the experiment code for aligned LongBench-v2 sparse
-attention comparisons on Qwen2.5-7B. The repository is now focused on the
-current Stage-2 evaluation pipeline rather than the earlier attention-map
-exploration scripts.
+SparseAttention contains shared-mask sparse-attention experiments for long
+contexts and reasoning. It includes aligned LongBench-v2 comparisons on
+Qwen2.5-7B and decode-time KV selection and compression on Qwen3-4B.
 
 The latest code also includes SharePrefill-AE head grouping, token-compacted
 sparse attention, token-first AutoBlock routing, aligned ten-task InfiniteBench
 evaluation, and final-kernel token-pair sparsity profiling for FlexPrefill and
 MInference.
+
+## Current Reasoning Experiments
+
+See [the reasoning experiment guide](experiments/reasoning_qhead_shared_topp_20260918/README.md)
+for the current W1, random shared-mask, physical KV compression and official
+`random_pp` implementations, validation and reproduction requirements.
+
+The latest HMMT configurations use raw-QK W1 selection, K=1024 or 2048, protected
+prompt plus recent64, and a 1000-step physical cache update interval. Two methods
+are available: compress to K and attend all surviving KV between events, or
+select K for attention every step while retaining K plus 4096 random candidates
+at physical updates. Full-KV W1, 64/500-step controls and historical baselines
+remain available for comparisons. Running experiments use independent frozen
+source snapshots; repository maintenance does not modify those snapshots.
+
+These reasoning experiments use a separate `random-attention` environment;
+the SharePrefill environment below has different Transformers and CUDA builds.
+Raw outputs, datasets, weights and frozen run directories remain local.
 
 ## What Is Included
 
@@ -78,6 +95,9 @@ Mode names:
 | `ss` | sparse attention | sparse attention |
 
 ## Quick Start
+
+For the current SharePrefill/Residual conda environment and pinned dependencies,
+see [ENVIRONMENT.md](ENVIRONMENT.md).
 
 Install dependencies in an environment with the correct CUDA-enabled PyTorch:
 

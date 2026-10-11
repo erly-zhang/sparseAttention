@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>J-lens · English Token View · v3</title>
+<link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+<header>
+  <div class="eyebrow">HMMT · QWEN3-4B · MATCHED-PREFIX PILOT</div>
+  <h1>J-lens readouts during reasoning</h1>
+  <p class="subtitle">A Figure 5–style interactive slice viewer: explore positions and layers, pin tokens, and track their full-vocabulary ranks.</p>
+  <div class="badges"><span>3 paired samples</span><span>K = 2048</span><span>Protected prompt + recent64</span><span>Compaction every 64 steps</span><span>Works offline</span><span>English token view · v3</span></div>
+</header>
+<main>
+<section class="toolbar" aria-label="Select experiment and position">
+  <label>Sample <select id="sample"><option value="0">HMMT · 0</option><option value="1">HMMT · 1</option><option value="2">HMMT · 2</option></select></label>
+  <label>Method <select id="arm"><option value="dense">Dense</option><option value="full_random">Random · Full KV</option><option value="full_w1">W1 · Full KV</option><option value="compact_random">Random · Compact KV</option><option value="compact_w1" selected>W1 · Compact KV</option></select></label>
+  <label>Position <select id="position"></select></label>
+  <label>Layer <select id="layer"></select></label>
+  <button id="previous" title="Previous captured position">←</button><button id="next" title="Next captured position">→</button>
+  <label class="check"><input type="checkbox" id="reasoningOnly" checked> Reasoning only</label>
+</section>
+<div class="status" id="status" role="status">Loading local data…</div>
+<div class="displaynotice"><strong>English-character token display.</strong> Grids and readout lists show the Top 8 ASCII letter/number tokens selected from the full vocabulary. Token ranks and probabilities remain full-vocabulary quantities; Recall@25 and JS also use the original full vocabulary.</div>
+<details class="prompt" open><summary>Original prompt <span id="promptCount"></span></summary><pre id="prompt"></pre></details>
+<section class="context"><div class="section-kicker">Context at the captured position · All methods replay the same Dense continuation</div><div id="context"></div><div id="positionInfo" class="muted"></div></section>
+<section class="pinbar">
+  <div><strong>Pinned tokens</strong><span class="muted"> Click a readout token to pin or unpin it; display up to 4 at once.</span></div>
+  <div id="pins"></div>
+  <div class="searchrow"><label>Search exported tokens <input id="search" placeholder="e.g. probably, sum, numbers" autocomplete="off"></label><select id="searchResults" aria-label="Search results"></select><button id="addPin">Pin</button><button id="clearPins">Clear</button><label class="check"><input type="checkbox" id="baseline" checked> Overlay Dense ranks</label></div>
+</section>
+<section class="explorer">
+  <div class="matrices">
+    <article class="panel">
+      <div class="panelhead"><div><h2>Position × layer: top English-character token</h2><p>Each column is a captured checkpoint. Scroll horizontally for more positions; click a cell to select its position and layer.</p></div><div class="legend"><i class="different"></i> Top token differs from Dense</div></div>
+      <div class="matrix-wrap"><div class="layer-axis" id="topAxis"></div><div class="matrix-scroll" id="topScroll"><canvas id="topGrid" aria-label="Top-token grid by position and layer"></canvas></div></div>
+      <div class="matrix-caption"><span>Light gray: before sparsity begins</span><span>Orange outline: current selection</span><span>Block indices: 0–35</span></div>
+    </article>
+    <article class="panel">
+      <div class="panelhead"><div><h2>Full-vocabulary rank of a pinned token</h2><p>Each cell prints the full-vocabulary rank of the same pinned token. Smaller numbers and darker colors indicate a higher rank; a range denotes a tie.</p></div><label>Heatmap token <select id="heatToken"></select></label></div>
+      <div class="ranklegend"><div class="gradient"><span style="left:0">1</span><span style="left:19.3%">10</span><span style="left:38.6%">100</span><span style="left:57.9%">1,000</span><span style="left:77.2%">10,000</span><span style="left:100%">Vocab end</span></div></div>
+      <div id="rankState" class="rank-state" role="status">Select a pinned token to view its ranks.</div>
+      <div class="rank-shell"><div class="matrix-wrap"><div class="layer-axis" id="rankAxis"></div><div class="matrix-scroll" id="rankScroll"><canvas id="rankGrid" aria-label="Pinned-token full-vocabulary rank heatmap"></canvas></div></div><div id="rankEmpty" class="rank-empty"><strong>No token selected</strong><span>Click any readout token to pin it, then choose it in the Heatmap token menu.</span><button id="pinCurrentTop">Pin selected cell’s top token</button></div></div>
+    </article>
+  </div>
+  <div class="slices">
+    <article class="panel"><div class="panelhead"><div><h2>Fixed position → layer slice</h2><p id="layerSubtitle"></p></div></div><div id="layerReadouts" class="readouts"></div><div class="charthead">Pinned-token ranks across layers <span class="muted">Dashed = Dense</span></div><div id="layerChart" class="chart"></div></article>
+    <article class="panel"><div class="panelhead"><div><h2>Fixed layer → position slice</h2><p id="positionSubtitle"></p></div></div><div id="positionReadouts" class="readouts"></div><div class="charthead">Pinned-token ranks across positions <span class="muted">x-axis = actual decode step</span></div><div id="positionChart" class="chart"></div><p class="chartnote">Lines connect measured checkpoints only; gaps contain no observations. Dashed = Dense; shading marks the selected method’s sparse phase.</p></article>
+    <article class="panel cellpanel"><div class="panelhead"><div><h2>Selected cell · English-character Top 8</h2><p>Top 8 ASCII tokens containing letters or numbers; ranks and probabilities use the full vocabulary.</p></div></div><div id="cellMetrics"></div><div id="cellReadout"></div></article>
+  </div>
+</section>
+<details class="methods"><summary>Reading guide · Methods, limitations, and sources</summary>
+  <p>Display policy: Top 8 is recomputed from the complete vocabulary after restricting token text to ASCII characters with at least one letter or digit. This is a character filter, not automatic English-language classification. Raw token strings are retained; no token translations are substituted. The English-character Top 8 can differ from the original multilingual wordlike Top 8. Selection algorithms, captured residuals, input prefixes, full-vocabulary ranks, and Recall@25/JS metrics are unchanged.</p>
+  <p>Readout formula: <span class="formula">p<sub>ℓ</sub>(v | h) = softmax(W<sub>U</sub> RMSNorm(J<sub>ℓ</sub> h))<sub>v</sub></span>. Block 35 uses J = I and gives the model’s next-token distribution. No workspace layer band is assumed for Qwen.</p>
+  <p>This viewer uses three completed, paired HMMT samples, each with up to 4,096 Dense continuation tokens. All sparse methods replay the same Dense prefixes, so comparisons use matched positions. These readouts do not measure sparse free-generation accuracy. Prompt prefill uses dense attention.</p>
+  <p>Full KV: select positions from the entire history at every step, without permanently deleting KV. Compact KV: select from the surviving cache every 64 steps and permanently delete other positions; cache length may exceed K between compactions. Both use a total budget K=2048 and protect all prompt tokens plus recent64. W1 scores with representative heads at the current query; Random selects randomly.</p>
+  <p>Actual checkpoints were captured every 128 steps and near sparsity boundaries. Column intervals are unequal; uncaptured tokens have no cells. Trajectory x-axes use actual steps, while each heatmap column represents one checkpoint. Step 0 is the last prompt token at prefill. Absolute positions are zero-based: abs = prompt_tokens + step − 1.</p>
+  <p>Pinned-token ranks are computed independently over the full vocabulary: <span class="formula">r<sub>min</sub>=1+∑<sub>v</sub>1[z<sub>v</sub>&gt;z<sub>t</sub>], r<sub>max</sub>=∑<sub>v</sub>1[z<sub>v</sub>≥z<sub>t</sub>]</span>. Finite-precision ties are shown as [r<sub>min</sub>, r<sub>max</sub>]. Cells display the exact rank interval; curves and colors use its geometric midpoint. Every Top 8 token displayed across this sample’s methods, positions, and layers can be pinned.</p>
+  <p>The public fixed lens was estimated on short WikiText sequences, which differ from long HMMT reasoning. The earlier J-space reconstruction probe did not outperform its random-dictionary negative control. This viewer describes J-lens readout differences; it does not establish workspace capacity loss or a causal mechanism for reasoning performance. The two Dense kernel controls have bitwise-identical residuals at these K2048 checkpoints.</p>
+  <p>Layout inspired by <a href="https://transformer-circuits.pub/2026/workspace/index.html" target="_blank" rel="noopener">Figure 5 of the Transformer Circuits 2026 workspace paper</a>. Data come from the local Qwen3-4B HMMT pilot. External links are optional for offline viewing. The original viewer used the meaningful-token filter from jacobian-lens (Apache-2.0, Anthropic PBC). This version additionally restricts display to ASCII tokens containing letters or numbers. <a href="manifest.json" target="_blank">View provenance and validation manifest</a>.</p>
+</details>
+<details class="prompt"><summary>Full Dense continuation (shared prefix for all methods)</summary><pre id="continuation"></pre></details>
+<footer>J-lens slice explorer · Local offline package · 2026-10-07 <span id="provenance"></span></footer>
+</main>
+<div id="tooltip" role="tooltip" hidden></div>
+<script src="viewer.js"></script>
+</body></html>

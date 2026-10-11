@@ -1,0 +1,127 @@
+We study sparse attention during autoregressive reasoning in a model with grouped
+query attention (GQA). Prefill uses dense causal attention. In the full KV variant,
+one representative Q head is selected separately for each layer and decode step
+using a private deterministic random stream. Its current post-RoPE query scores the
+eligible keys of the corresponding KV head. A softmax over all candidate keys
+produces token importance scores. The full prompt and the most recent64 reasoning
+positions are protected, and the remaining attention budget is filled by the
+highest-scoring unprotected positions. The selected original positions are shared
+across all KV heads, while each Q head retains its own query and its GQA-mapped K/V
+values. Selected indices are chronological, and each attention head independently
+normalizes its attention over the same selected position set in full KV mode.
+The compact variant computes this selection only at physical compaction events,
+after the current attention has already consumed the available cache.
+
+The current reasoning implementation does not use AE clustering or fixed
+representative-head groups. The representative head identity changes with layer
+and decode step, is reproducible from representative seed0 and the stable input
+index, and is shared across the active sampled rollouts of that input. Scores and
+selected positions are computed separately for each rollout's actual query and
+KV values. Generation uses a separate seed42 stream. The method requires no
+additional training.
+
+Let P be the prompt length, t the number of reasoning tokens already processed
+by decode, and N_t=P+t the absolute prefix length. Let C_{l,t} be the candidate
+set of original positions at layer l. For full KV retention, C_{l,t} is all
+positions0,...,N_t-1. For physical compaction, it contains only the surviving KV
+positions and the newly appended token. With H_q query heads and H_kv KV heads,
+the representative query head r maps to
+
+    g(r) = floor(r / (H_q/H_kv)).
+
+For the current-query W1 selector, importance is
+
+    z_j = q_{l,t}^{r} dot k_{l,j}^{g(r)} / (sqrt(d) * temperature),
+    s_j = exp(z_j) / sum_{i in C_{l,t}} exp(z_i).
+
+The scoring temperature is1. The implementation preserves BF16 matmul/division
+and FP32 softmax. W1 uses exactly the current query; it does not accumulate or
+average previous attention observations. No additional member-head scores are
+computed for selection.
+
+With prompt and recency protection enabled, define
+
+    F_{l,t} = ({0,...,P-1} intersect C_{l,t})
+              union {j in C_{l,t}: j >= max(P,N_t-64)},
+    B_{l,t} = min(K, |C_{l,t}|),
+    U_{l,t} = C_{l,t} minus F_{l,t},
+    S_{l,t} = F_{l,t} union TopK_{j in U_{l,t}}
+                          (s_j, B_{l,t}-|F_{l,t}|).
+
+K is the TOTAL budget, including prompt and recent64. Protection must fit in K;
+the runner rejects a configuration that would silently clip it. Exact score ties
+prefer the earlier original position. When |C_{l,t}|<=K, every candidate is kept.
+In unprotected ablations F is empty. The random shared control replaces s_j with
+independent Uniform scores, uses independent secondary random bits for finite
+precision ties, and shares the resulting positions across KV heads.
+
+We distinguish two execution policies. Under full KV retention, all historical
+keys and values are stored, and S_{l,t} is a temporary attention selection rebuilt
+before every decode attention. A token omitted at one step can be selected later.
+Attention uses at most K positions per head, but KV memory grows with sequence
+length and representative scoring still inspects the complete history.
+
+Under periodic physical compaction, attention first consumes the surviving KV
+cache plus the new token. After attention, at decode steps divisible by D, the
+selector permanently removes unselected KV if the cache exceeds K. The retained
+cache has K positions after such an event and grows between events, so attention
+can consume up to K+D positions. Original RoPE positions are preserved; discarded
+KV cannot be recovered. D=64 and D=500 are separate algorithmic settings. This
+policy differs from applying a K-position temporary mask at every step, and equal
+K does not imply equal realized attention pair sparsity.
+
+The official random_pp baseline also physically compacts KV but uses independent
+Uniform scores and retention sets for each KV head. Its total post-compaction
+budget K includes prompt and recent64. The original trigger depends on cached
+length: eviction occurs after attention when cached_length>K and
+cached_length modulo64=0. This trigger phase differs from our shared compact64
+policy based on decode_step modulo64. The vendored random_pp code and its native
+TopK/tie handling are unchanged; an adapter isolates mask randomness from output
+sampling and records actual attention pairs. It is therefore a related control,
+not the same selection algorithm or the same sharing policy.
+
+Our implementation optimization for full KV W1 preserves the score and selected
+set. It replaces CUDA nonzero extraction with known contiguous candidate ranges,
+batches stable ranking across rollouts, reuses index and length buffers, directly
+reads the current query, reuses the private CPU generator with the original seeds,
+and fuses KV append and metadata updates. Exact score, mask, attention, full-cache
+content, GQA, batch-shrink and global-RNG tests passed, as did a complete sampled
+trajectory in a small Qwen3 model. These are correctness checks. The first measured
+speed gains are from synthetic single-layer timings on an A100 MIG slice, not a
+confirmed full-model or full-dataset speedup. The real Qwen3-4B HMMT paired trial
+is separately queued.
+
+The main evaluation uses Qwen3-4B (36 layers,32 Q heads,8 KV heads,head dimension128),
+BF16, batch2 with two sampled outputs per question, generation temperature0.6,
+generation top_p0.95, generation seed42, and total maximum length32768 including
+the prompt. HMMT contains60 canonical inputs, producing120 answers per method.
+The evaluated total budgets are1024,2048 and4096 across existing shared-selector
+experiments. The new official random_pp HMMT baseline covers1024 and2048. Its
+first3 smoke inputs are reused in each full60 result. Input token counts and
+input-ID SHA256 are verified against the same saved reference for every sample.
+Accuracy is the mean correctness of sampled answers, not pass@2.
+
+Efficiency reporting separates output length from cost per decode forward and
+reports synchronized prefill/decode wall time, peak allocated memory, and raw
+selected/causal pair totals. Decode timing includes scoring or random generation,
+ranking, index processing, gathering or compaction, attention, sampling and
+bookkeeping. Loading, warmup and diagnostic serialization are excluded. Sparse
+free generation can change both output length and execution cost, so elapsed
+time alone does not isolate the efficiency of token selection.
+
+For a literature review, relevant search topics are dynamic sparse attention
+during decoding; importance-based token retention; KV cache eviction; shared
+token selection across attention heads under GQA; random retention baselines;
+and long reasoning inference with bounded KV memory. The research questions are
+whether one representative head can provide useful shared selection, how its
+ranking compares to random retention at the same total budget, and how reversible
+attention selection differs from irreversible cache deletion. Novelty and
+superiority over prior work require a separate literature comparison and matched
+experiments; neither is established by this method description.
+
+Source files:
+ra_harness/kvcompress/engine/selector_grid_cache.py
+ra_harness/kvcompress/engine/full_w1_optimized_cache.py
+ra_harness/kvcompress/engine/official_random_pp_cache.py
+ra_harness/kvcompress/engine/official_random_attention/cache_utils.py
+ra_harness/kvcompress/harness/generation_utils.py

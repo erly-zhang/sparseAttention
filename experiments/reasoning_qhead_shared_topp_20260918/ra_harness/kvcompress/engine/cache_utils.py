@@ -28,7 +28,7 @@ from transformers.cache_utils import Cache, DynamicLayer
 
 # Modes with no 'attn' in the name that still consume the query buffer / attention scores
 # (the T1.0 mixes need all three heuristic signals: value-range, attention, CAOTE output-error).
-_QUERY_MODES = ('caote', 'caote_pp', 'cusa', 'mix_step_pp', 'mix_head_pp', 'union_topk_pp', 'rkv_official', 'qhead_shared_topp')
+_QUERY_MODES = ('caote', 'caote_pp', 'cusa', 'mix_step_pp', 'mix_head_pp', 'union_topk_pp', 'rkv_official', 'qhead_shared_topp_eviction', 'qhead_shared_topp', 'qhead_shared_mask_topp', 'qhead_shared_mask_w1_recent_gpu')
 
 
 def _stable_hash(*vals):
@@ -53,13 +53,84 @@ class EvictCache(Cache):
     ):
 
         config = config.get_text_config(decoder=True)
+        layer_type = EvictLayer
+        if eviction_mode in ('qhead_shared_topp', 'qhead_shared_mask_topp'):
+            from kvcompress.engine.shared_mask_cache import SharedMaskLayer
+            layer_type = SharedMaskLayer
+        elif eviction_mode == 'official_random_pp':
+            from kvcompress.engine.official_random_pp_cache import OfficialRandomPPLayer
+            layer_type = OfficialRandomPPLayer
+        elif eviction_mode == 'qhead_shared_mask_w1_recent_gpu':
+            from kvcompress.engine.w1_recent_shared_mask_cache import W1RecentSharedMaskLayer
+            layer_type = W1RecentSharedMaskLayer
+        elif eviction_mode == 'qhead_shared_mask_random':
+            from kvcompress.engine.random_shared_mask_cache import RandomSharedMaskLayer
+            layer_type = RandomSharedMaskLayer
+        elif eviction_mode == 'qhead_shared_representative_window_compact_optimized_gpu':
+            from kvcompress.engine.representative_window_compact_optimized_cache import RepresentativeWindowCompactOptimizedLayer
+            layer_type = RepresentativeWindowCompactOptimizedLayer
+        elif eviction_mode == 'qhead_shared_representative_compact_optimized_gpu':
+            from kvcompress.engine.representative_compact_optimized_cache import RepresentativeCompactOptimizedLayer
+            layer_type = RepresentativeCompactOptimizedLayer
+        elif eviction_mode == 'qhead_shared_representative_compact_recent_gpu':
+            from kvcompress.engine.representative_compact_recent_cache import RepresentativeCompactRecentLayer
+            layer_type = RepresentativeCompactRecentLayer
+        elif eviction_mode == 'qhead_shared_random_compact_precomputed_gpu':
+            from kvcompress.engine.random_compact_precomputed_cache import RandomCompactPrecomputedLayer
+            layer_type = RandomCompactPrecomputedLayer
+        elif eviction_mode == 'qhead_shared_random_compact_recent_gpu':
+            from kvcompress.engine.random_compact_recent_cache import RandomCompactRecentLayer
+            layer_type = RandomCompactRecentLayer
+        elif eviction_mode == 'qhead_shared_mask_random_fixed_recent_gpu':
+            from kvcompress.engine.random_fixed_recent_shared_mask_cache import RandomFixedRecentSharedMaskLayer
+            layer_type = RandomFixedRecentSharedMaskLayer
+        elif eviction_mode == 'qhead_shared_mask_bernoulli_recent_gpu':
+            from kvcompress.engine.bernoulli_recent_shared_mask_cache import BernoulliRecentSharedMaskLayer
+            layer_type = BernoulliRecentSharedMaskLayer
+        elif eviction_mode == 'qhead_shared_mask_random_precomputed_recent_gpu':
+            from kvcompress.engine.random_precomputed_shared_mask_cache import RandomPrecomputedSharedMaskLayer
+            layer_type = RandomPrecomputedSharedMaskLayer
+        elif eviction_mode == 'qhead_shared_mask_random_recent_gpu':
+            from kvcompress.engine.random_recent_shared_mask_cache import RandomRecentSharedMaskLayer
+            layer_type = RandomRecentSharedMaskLayer
+        if eviction_mode.startswith('grid_'):
+            from kvcompress.engine.selector_grid_cache import SelectorGridLayer
+            layer_type = SelectorGridLayer
         layers = [
-            EvictLayer(l, token_budget, residual_length, eviction_mode, **kwargs)
+            layer_type(l, token_budget, residual_length, eviction_mode, **kwargs)
             for l in range(config.num_hidden_layers)
         ]
         super().__init__(layers=layers)
-        for _lyr in layers:            # back-ref so triattn_ph can aggregate scores across ALL layers (layer-shared keep-set)
-            _lyr._sibling_layers = layers
+        if eviction_mode == 'qhead_shared_mask_random_precomputed_recent_gpu':
+            from kvcompress.engine.random_precomputed_shared_mask_cache import RandomMaskPlan
+            first = layers[0]
+            self.mask_plan = RandomMaskPlan(len(layers), first.random_keep_ratio,
+                first.recent_window, first.mask_seed, first.sample_id, first.rep_seed,
+                first.mask_precompute_window)
+            for layer in layers:
+                layer.mask_plan = self.mask_plan
+
+        if eviction_mode == 'qhead_shared_mask_bernoulli_recent_gpu':
+            from kvcompress.engine.bernoulli_recent_shared_mask_cache import BernoulliMaskPlan
+            first = layers[0]
+            self.mask_plan = BernoulliMaskPlan(len(layers), first.random_keep_ratio,
+                first.recent_window, first.mask_seed, first.sample_id, first.rep_seed, first.mask_precompute_window)
+            for layer in layers:
+                layer.mask_plan = self.mask_plan
+
+        if eviction_mode == 'qhead_shared_random_compact_precomputed_gpu':
+            from kvcompress.engine.random_compact_precomputed_cache import CompactRandomMaskPlan
+            first = layers[0]
+            self.compact_mask_plan = CompactRandomMaskPlan(len(layers),first.reasoning_budget,
+                first.eviction_interval,first.recent_window,first.mask_seed,first.sample_id,
+                first.mask_precompute_window)
+            for layer in layers:
+                layer.compact_mask_plan = self.compact_mask_plan
+        # Only TriAttention needs cross-layer references. Attaching them to
+        # other modes retains whole GPU caches until cyclic GC runs.
+        if eviction_mode == "triattn_ph":
+            for _lyr in layers:
+                _lyr._sibling_layers = layers
         # GENERATION-BOUNDARY MEMO RESET (08-04 audit, must-fix #1). The triattn_ph cross-layer
         # keep-set memo is a single module-global slot. Without this reset, if problem A ends exactly
         # one eviction round after its first compaction and problem B ties on the whole key
@@ -129,6 +200,8 @@ class EvictLayer(DynamicLayer):
         top_p: float = 0.9,
         rep_seed: int = 0,
         sample_id: int = None,
+        eviction_interval: int = 1,
+        query_window: int = 64,
     ):
         super().__init__()
         self.layer_idx = layer_idx
@@ -141,12 +214,23 @@ class EvictLayer(DynamicLayer):
         self.n_large = n_large
         self.temperature = temperature
         self.top_p = top_p
+        self.eviction_interval = eviction_interval
+        if query_window < 1:
+            raise ValueError("query_window must be a positive integer")
+        self.query_window = query_window
+        if eviction_mode in ('qhead_shared_topp_eviction', 'qhead_shared_topp', 'qhead_shared_mask_topp', 'qhead_shared_mask_w1_recent_gpu'):
+            if not 0 < top_p <= 1 or token_budget < 0 or residual_length != 0 or eviction_interval < 1:
+                raise ValueError('shared Top-p requires 0<p<=1, budget>=0, residual=0, interval>=1')
+        self.selected_pairs = 0
+        self.causal_pairs = 0
+        self.max_visible_tokens = 0
+        self.selection_events = 0
         self.rep_seed = rep_seed
         self.sample_id = sample_id
         self.n_sink = 4
         self.cumulative_length = 0
         self._q_write_pos = 0  # circular buffer head for self.queries (attn modes only)
-        self._query_buf_len = max(self.residual_length, 64)
+        self._query_buf_len = query_window if eviction_mode in ('qhead_shared_topp', 'qhead_shared_mask_topp', 'qhead_shared_mask_w1_recent_gpu') else max(self.residual_length, 64)
         self._rep_gen = None
         # Absolute-position tracking: required by triattn (delta/phi) and by the T1.0 keep-set logger
         # (KEEPLOG env), which needs the true trace position of every kept slot for coverage entropy.
@@ -162,7 +246,7 @@ class EvictLayer(DynamicLayer):
         batch_size, prompt_len, num_kv_heads, head_dim = key_states.shape
         self.dtype = key_states.dtype
         self.device = key_states.device
-        max_cache_len = max(prompt_len, self.token_budget) + self.residual_length
+        max_cache_len = max(prompt_len, self.token_budget, 256 if self.MODE in ('qhead_shared_topp_eviction', 'qhead_shared_topp', 'qhead_shared_mask_topp', 'qhead_shared_mask_w1_recent_gpu', 'qhead_shared_mask_random', 'qhead_shared_mask_random_recent_gpu', 'qhead_shared_mask_random_precomputed_recent_gpu') else 0) + self.residual_length
         self.k_cache = torch.zeros(
             batch_size, max_cache_len, num_kv_heads, head_dim,
             dtype=self.dtype, device=self.device,
@@ -172,6 +256,7 @@ class EvictLayer(DynamicLayer):
             dtype=self.dtype, device=self.device,
         )
         self.cache_seqlens = torch.zeros(batch_size, dtype=torch.int32, device=self.device)
+        self._batch_ids = list(range(batch_size))
         if self._track_positions:   # per-KV-head absolute token position of each cache slot (triattn delta/phi; KEEPLOG coverage)
             self.positions = torch.zeros(batch_size, num_kv_heads, max_cache_len, dtype=torch.long, device=self.device)
         if self._rep_gen is None:
@@ -188,6 +273,19 @@ class EvictLayer(DynamicLayer):
         """Return (k_cache, v_cache, cache_seqlens) for flash_attn_with_kvcache."""
         if not self.is_initialized:
             self.lazy_initialization(key_states, value_states)
+        if self.MODE in ('qhead_shared_topp_eviction', 'qhead_shared_topp', 'qhead_shared_mask_topp', 'qhead_shared_mask_w1_recent_gpu', 'qhead_shared_mask_random'):
+            required = int(self.cache_seqlens.max().item()) + key_states.shape[1]
+            if required > self.k_cache.shape[1]:
+                capacity = max(required, 2 * self.k_cache.shape[1])
+                for name in ('k_cache', 'v_cache'):
+                    old = getattr(self, name)
+                    new = old.new_zeros((old.shape[0], capacity, *old.shape[2:]))
+                    new[:, :old.shape[1]].copy_(old)
+                    setattr(self, name, new)
+                if hasattr(self, 'positions'):
+                    old = self.positions
+                    self.positions = old.new_zeros((old.shape[0], old.shape[1], capacity))
+                    self.positions[:, :, :old.shape[2]].copy_(old)
         return self.k_cache, self.v_cache, self.cache_seqlens
 
     def update(
@@ -210,9 +308,10 @@ class EvictLayer(DynamicLayer):
             return
 
         q_len = query_states.shape[2]
-        if q_len == 1: # decode: round-robin single-slot copy into the existing buffer.
+        if q_len == 1 and hasattr(self, 'queries'): # decode: round-robin single-slot copy into the existing buffer.
             self.queries[:, :, self._q_write_pos:self._q_write_pos + 1, :].copy_(query_states)
             self._q_write_pos = (self._q_write_pos + 1) % self._query_buf_len
+            self._q_valid = min(self._query_buf_len, self._q_valid + 1)
         else:          # prefill (first call): allocate the buffer and fill from last `n` queries.
             B, Hq, _, D = query_states.shape
             self.queries = torch.zeros(B, Hq, self._query_buf_len, D,
@@ -220,30 +319,129 @@ class EvictLayer(DynamicLayer):
             n = min(q_len, self._query_buf_len)
             self.queries[:, :, :n, :].copy_(query_states[:, :, -n:, :])
             self._q_write_pos = n % self._query_buf_len
+            self._q_valid = n
 
     def post_attention_update(self, n_new: int) -> None:
         """
         Called after `flash_attn_with_kvcache` has written n_new K/V into the cache.
         Advances cache_seqlens and periodically runs eviction.
         """
+        if self.MODE == 'qhead_shared_topp_eviction':
+            # Logical pairs actually consumed by attention, including prefill and every decode step.
+            old_lengths = self.cache_seqlens.tolist()
+            hq = self.queries.shape[1]
+            triangular = n_new * (n_new + 1) // 2
+            self.selected_pairs += hq * sum(n_new * n + triangular for n in old_lengths)
+            self.causal_pairs += hq * len(old_lengths) * (n_new * self.cumulative_length + triangular)
+            self.max_visible_tokens = max(self.max_visible_tokens, max(old_lengths) + n_new)
+            if self.cumulative_length == 0:
+                self.prompt_len = n_new
         self.cache_seqlens += n_new
         self.cumulative_length += n_new
         if n_new > 1:                       # prefill: remember the prompt length (for *_pp prompt protection)
             self.prompt_len = int(n_new)
         if self._track_positions:                           # stamp the absolute position of the just-appended slots
-            cur = int(self.cache_seqlens[0].item()); C = self.cumulative_length
-            self.positions[:, :, cur - n_new:cur] = torch.arange(
-                C - n_new, C, device=self.device, dtype=torch.long).view(1, 1, -1)
+            C = self.cumulative_length
+            for b, cur in enumerate(self.cache_seqlens.tolist()):
+                self.positions[b, :, cur - n_new:cur] = torch.arange(
+                    C - n_new, C, device=self.device, dtype=torch.long).view(1, -1)
 
-        is_decode = (n_new == 1)
-        cur_len = int(self.cache_seqlens[0].item())  # same length across the batch — GUARANTEED by the
-        # harness (eval_hf.py batches ONE prompt replicated bs times; batch dim = sampling runs). If you ever
-        # batch DIFFERENT prompts here, this shared trigger + the scalar prompt_len become wrong (pads would
-        # enter the cache and the budget); audited 2026-07-14 — see REPORT "Batching audit".
-        if is_decode and ((self.MODE == 'qhead_shared_topp' and cur_len >= self.token_budget) or (self.MODE != 'qhead_shared_topp' and cur_len > self.token_budget and cur_len % self.residual_length == 0)):
+        is_decode = n_new == 1 and self.cumulative_length > getattr(self, 'prompt_len', 0)
+        if self.MODE == 'qhead_shared_topp_eviction':
+            if is_decode:
+                lengths = self.cache_seqlens.tolist()
+                if self.token_budget == 0:
+                    if (self.cumulative_length - self.prompt_len) % self.eviction_interval == 0:
+                        self._run_shared_topp(lengths, [True] * len(lengths))
+                else:
+                    eligible = [n >= self.token_budget for n in lengths]
+                    if any(eligible):
+                        self._run_shared_topp(lengths, eligible)
+            return
+        cur_len = int(self.cache_seqlens[0].item())
+        if is_decode and cur_len > self.token_budget and cur_len % self.residual_length == 0:
             self._run_eviction(cur_len)
 
+    def _run_shared_topp(self, lengths, eligible):
+        """Score only valid keys; compact each row without padded gather indices.
+
+        budget=0 disables the token-count trigger/cap. Selection cadence is then
+        eviction_interval decode steps. Prompt positions remain protected.
+        """
+        B, _, Hkv, D = self.k_cache.shape
+        Hq = self.queries.shape[1]
+        r = int(torch.randint(Hq, (1,), generator=self._rep_gen, device=self.device).item())
+        kv = r // (Hq // Hkv)
+        extent = max(lengths)
+        q = self.queries[:, r, :self._q_valid]
+        keys = self.k_cache[:, :extent, kv]
+        logits = torch.matmul(q, keys.transpose(1, 2)) / (math.sqrt(D) * self.temperature)
+        valid = torch.arange(extent, device=self.device)[None, :] < self.cache_seqlens[:, None]
+        logits.masked_fill_(~valid[:, None, :], float('-inf'))
+        scores = F.softmax(logits, dim=-1, dtype=torch.float32).mean(dim=1)
+        pl = self.prompt_len
+        self._rep_head, self._rep_kv = r, kv
+        self._last_selected_ids = []
+        self._sel_mass = []
+        records = []
+        for b, n in enumerate(lengths):
+            if not pl <= n <= self.k_cache.shape[1]:
+                raise RuntimeError(f'invalid cache length: prompt={pl}, valid={n}, capacity={self.k_cache.shape[1]}')
+            mass = 0.0
+            n_reas = n - pl
+            if eligible[b] and n_reas:
+                reas = scores[b, pl:n]
+                total = reas.sum()
+                if not bool(torch.isfinite(total)):
+                    raise RuntimeError('non-finite representative-head scores')
+                if float(total) <= 0:
+                    # Underflow cannot justify evicting any key; conservatively retain all.
+                    ids = torch.arange(n, device=self.device)
+                    mass = 1.0
+                else:
+                    probs = reas / total
+                    sp, si = probs.sort(descending=True)
+                    cumulative = sp.cumsum(0)
+                    count = n_reas if self.top_p == 1 else min(n_reas, int((cumulative < self.top_p).sum().item()) + 1)
+                    ids = torch.cat((torch.arange(pl, device=self.device), pl + si[:count])).sort().values
+                    mass = float(probs[ids[pl:] - pl].sum())
+            else:
+                ids = torch.arange(n, device=self.device)
+                mass = 1.0 if n_reas else 0.0
+            kept = ids.numel()
+            # index_select materializes before writing, so overlapping compaction is safe.
+            self.k_cache[b, :kept].copy_(self.k_cache[b].index_select(0, ids))
+            self.v_cache[b, :kept].copy_(self.v_cache[b].index_select(0, ids))
+            if hasattr(self, 'positions'):
+                self.positions[b, :, :kept].copy_(self.positions[b].index_select(1, ids))
+            self.cache_seqlens[b] = kept
+            self._last_selected_ids.append(ids)
+            self._sel_mass.append(mass)
+            if os.environ.get('QHEAD_DEBUG', '0') == '1':
+                assert torch.equal(ids[:pl], torch.arange(pl, device=self.device)), 'prompt not retained'
+                assert bool((ids[1:] > ids[:-1]).all()), 'duplicate or unordered effective key'
+                assert kept <= n and (not n_reas or mass >= self.top_p - 1e-5)
+            if eligible[b] and os.environ.get('QHEAD_LOG'):
+                records.append(dict(
+                    layer=self.layer_idx, step=self.cumulative_length, batch=b,
+                    rollout=self._batch_ids[b], sample_id=self.sample_id, p=self.top_p,
+                    prompt_len=pl, reasoning_candidates=n_reas, selected_reasoning_K=kept-pl,
+                    selected_reasoning_mass=mass, reasoning_keep_ratio=(kept-pl)/n_reas if n_reas else 0.0,
+                    total_visible_tokens=n, overall_keep_ratio=kept/n,
+                    representative_q_head=r, representative_kv_head=kv,
+                    cache_capacity=self.k_cache.shape[1], implementation='row_safe_v2',
+                    token_budget=self.token_budget, eviction_interval=self.eviction_interval))
+        self.selection_events += 1
+        self._sel_seqlens = self.cache_seqlens.clone()
+        if records:
+            with open(os.environ['QHEAD_LOG'], 'a') as stream:
+                stream.writelines(json.dumps(record) + '\n' for record in records)
+
     def _run_eviction(self, cur_len: int) -> None:
+        if self.MODE == 'qhead_shared_topp_eviction':
+            lengths = self.cache_seqlens.tolist()
+            self._run_shared_topp(lengths, [True] * len(lengths))
+            return
         def select_remaining_based_on_scores(ids_to_keep, scores, n_remain):
             scores.scatter_(dim=-1, index=ids_to_keep, value=float('-inf'))
             ids_remain = scores.topk(n_remain, dim=-1, largest=True).indices
@@ -353,53 +551,7 @@ class EvictLayer(DynamicLayer):
             attn_scores = _imp * self.rkv_lambda - _red * (1 - self.rkv_lambda)
 
 
-        if self.MODE == 'qhead_shared_topp':
-            if self._rep_gen is None:
-                self._rep_gen = torch.Generator(device=self.device)
-            Hq = self.queries.shape[1]
-            Hkv = k_candidates.shape[1]
-            g = Hq // Hkv
-            r = int(torch.randint(0, Hq, (1,), generator=self._rep_gen, device=self.device).item())
-            kv = r // g
-            qh = self.queries[:, r, :, :]
-            kh = k_candidates[:, kv, :, :]
-            _aw = torch.matmul(qh, kh.transpose(1, 2)) / (math.sqrt(head_dim) * self.temperature)
-            _aw = F.softmax(_aw, dim=-1, dtype=torch.float32)
-            scores = _aw.mean(dim=1)
-            pl = int(getattr(self, 'prompt_len', 0))
-            reas = scores[:, pl:].clone()
-            reas = reas / reas.sum(dim=-1, keepdim=True).clamp(min=1e-12)
-            sp, si = reas.sort(dim=-1, descending=True)
-            cum = sp.cumsum(dim=-1)
-            n_reas = reas.shape[-1]
-            num_keep = (cum < self.top_p).sum(dim=-1) + 1
-            num_keep = torch.clamp(num_keep, min=1, max=n_reas)
-            arange = torch.arange(n_reas, device=self.device).unsqueeze(0)
-            keep_mask = arange < num_keep.unsqueeze(1)
-            prompt_ids = torch.arange(pl, device=self.device)
-            ids_list = []
-            seqlens = []
-            sel_mass = []
-            for b in range(batch_size):
-                sel_abs = pl + si[b][keep_mask[b]]
-                ids = torch.cat([prompt_ids, sel_abs], dim=0)
-                ids_list.append(ids)
-                seqlens.append(int(ids.shape[0]))
-                km = int(num_keep[b].item())
-                sel_mass.append(float(cum[b, km - 1]) if km > 0 else 0.0)
-            K_var = max(seqlens)
-            self._topk_var = K_var
-            self._sel_seqlens = torch.tensor(seqlens, device=self.device, dtype=torch.int32)
-            self._sel_mass = sel_mass
-            self._rep_head = r
-            self._rep_kv = kv
-            self._last_n_reas = n_reas
-            ids_to_keep = torch.stack([
-                torch.cat([t, t[-1].repeat(K_var - t.shape[0])]) if t.shape[0] < K_var else t
-                for t in ids_list
-            ]).unsqueeze(1).expand(batch_size, n_heads, -1).contiguous()
-
-        elif self.MODE in ['attn', 'attn_rkv', 'rkv_official']:
+        if self.MODE in ['attn', 'attn_rkv', 'rkv_official']:
             ids_to_keep = attn_scores.topk(K, dim=-1, largest=True).indices
 
         elif self.MODE in ['range_attn', 'range_sample_attn', 'range_sink_sample_attn',
@@ -1069,54 +1221,6 @@ class EvictLayer(DynamicLayer):
             raise NotImplementedError(f"{self.MODE} not matched in cache_utils.py!")
 
 
-        if self.MODE == 'qhead_shared_topp':
-            ids_to_keep, _ = torch.sort(ids_to_keep, dim=-1)
-            K_var = int(getattr(self, '_topk_var', ids_to_keep.shape[-1]))
-            ids_exp = ids_to_keep[..., None].expand(-1, -1, -1, head_dim)
-            k_compress = torch.gather(k_candidates, dim=2, index=ids_exp)
-            v_compress = torch.gather(v_candidates, dim=2, index=ids_exp)
-            self.k_cache[:, :K_var].copy_(k_compress.transpose(1, 2))
-            self.v_cache[:, :K_var].copy_(v_compress.transpose(1, 2))
-            seqlens = getattr(self, '_sel_seqlens', None)
-            if seqlens is not None:
-                self.cache_seqlens.copy_(seqlens)
-            else:
-                self.cache_seqlens.fill_(K_var)
-            if os.environ.get('QHEAD_DEBUG', '0') == '1':
-                pl = int(getattr(self, 'prompt_len', 0))
-                kept0 = ids_to_keep[0, 0]
-                assert torch.equal(kept0[:pl], torch.arange(pl, device=self.device)), 'prompt not retained'
-                assert torch.equal(ids_to_keep[0], ids_to_keep[0, 0:1].expand_as(ids_to_keep[0])), 'mask not shared'
-                assert torch.equal(kept0, torch.sort(kept0)[0]), 'keep set not chronological'
-                sm = getattr(self, '_sel_mass', None)
-                if sm is not None:
-                    for b in range(batch_size):
-                        assert sm[b] >= self.top_p - 1e-3, ('top-p mass below p', sm[b], self.top_p)
-            if os.environ.get('QHEAD_LOG', ''):
-                pl = int(getattr(self, 'prompt_len', 0))
-                n_reas = int(getattr(self, '_last_n_reas', 0))
-                for b in range(batch_size):
-                    km = int(self._sel_seqlens[b].item()) - pl
-                    rec = {
-                        'layer': int(self.layer_idx),
-                        'step': int(self.cumulative_length),
-                        'batch': b,
-                        'sample_id': int(self.sample_id) if self.sample_id is not None else -1,
-                        'p': float(self.top_p),
-                        'prompt_len': pl,
-                        'reasoning_candidates': n_reas,
-                        'selected_reasoning_K': km,
-                        'selected_reasoning_mass': float(self._sel_mass[b]),
-                        'reasoning_keep_ratio': (km / n_reas) if n_reas else 0.0,
-                        'total_visible_tokens': pl + n_reas,
-                        'overall_keep_ratio': ((pl + km) / (pl + n_reas)) if (pl + n_reas) else 0.0,
-                        'representative_q_head': int(self._rep_head),
-                        'representative_kv_head': int(self._rep_kv),
-                    }
-                    with open(os.environ['QHEAD_LOG'], 'a') as f:
-                        f.write(json.dumps(rec) + '\n')
-            return
-
         assert ids_to_keep.size(-1) == K
 
         # UNIVERSAL CHRONOLOGICAL COMPACTION (2026-07-09): sort every mode's keep-set before the gather so the
@@ -1259,6 +1363,7 @@ class EvictLayer(DynamicLayer):
     def batch_select_indices(self, indices: torch.Tensor) -> None:
         if not self.is_initialized:
             return
+        self._batch_ids = [self._batch_ids[i] for i in indices.tolist()]
         self.k_cache = self.k_cache[indices].contiguous()
         self.v_cache = self.v_cache[indices].contiguous()
         self.cache_seqlens = self.cache_seqlens[indices].contiguous()

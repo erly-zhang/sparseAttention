@@ -1,0 +1,33 @@
+# Linux x86_64 / Python 3.10, current SharePrefill/Residual runtime.
+# Install torch==2.4.0 from https://download.pytorch.org/whl/cu124 first.
+# Derived from FlexPrefill a24b27bf117fd6ad4ba34b0db82c598e7786fd59.
+torch==2.4.0
+triton==3.0.0
+transformers==4.44.0
+accelerate==0.33.0
+numpy==1.26.4
+scipy==1.13.1
+scikit-learn==1.5.1
+networkx==3.2.1
+pandas==2.2.2
+matplotlib==3.9.2
+datasets==2.21.0
+evaluate==0.4.2
+peft==0.12.0
+huggingface-hub==0.24.7
+einops==0.8.0
+sentencepiece==0.2.0
+tiktoken==0.7.0
+PyYAML==6.0.2
+requests>=2.32.3,<3
+jieba==0.42.1
+rouge==1.0.1
+rouge-score==0.1.2
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.25.1
+zstandard==0.23.0
+packaging<25
+setuptools<81
+lm_eval @ git+https://github.com/EleutherAI/lm-evaluation-harness.git@a4987bba6e9e9b3f22bd3a6c1ecf0abd04fd5622
+flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.6.3/flash_attn-2.6.3%2Bcu123torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+flex_prefill @ git+https://github.com/ByteDance-Seed/FlexPrefill.git@a24b27bf117fd6ad4ba34b0db82c598e7786fd59

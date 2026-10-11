@@ -1,0 +1,33 @@
+# Linux x86_64 / Python 3.10, current SharePrefill/Residual runtime.
+# Install torch==2.6.0 from https://download.pytorch.org/whl/cu124 first.
+# FlexPrefill source is loaded by --flexprefill_root; its old package pin requires Triton 3.0.
+# Later probability-mean code requires Triton 3.2 for unchanged math.sqrt constexpr calls.
+torch==2.6.0
+triton==3.2.0
+transformers==4.44.0
+accelerate==0.33.0
+numpy==1.26.4
+scipy==1.13.1
+scikit-learn==1.5.1
+networkx==3.2.1
+pandas==2.2.2
+matplotlib==3.9.2
+datasets==2.21.0
+evaluate==0.4.2
+peft==0.12.0
+huggingface-hub==0.24.7
+einops==0.8.0
+sentencepiece==0.2.0
+tiktoken==0.7.0
+PyYAML==6.0.2
+requests>=2.32.3,<3
+jieba==0.42.1
+rouge==1.0.1
+rouge-score==0.1.2
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.25.1
+zstandard==0.23.0
+packaging<25
+setuptools<81
+lm_eval @ git+https://github.com/EleutherAI/lm-evaluation-harness.git@a4987bba6e9e9b3f22bd3a6c1ecf0abd04fd5622
+flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1%2Bcu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl

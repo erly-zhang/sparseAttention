@@ -1,0 +1,12 @@
+{
+  "model": "/RESTORE/model/Llama-3.1-8B-Instruct",
+  "data": "/RESTORE/infinitebench_benchmark_specific_calibration/filtered_data/kv_retrieval.jsonl",
+  "group_config": "/RESTORE/calibration/llama31_8b_instruct/shareprefill_ae_k3_head_groups.json",
+  "reference_metrics": "/RESTORE/llama31/shareprefill_ae3_token_block_auto/kv_retrieval/online_metrics.jsonl",
+  "old_random_metrics": "/RESTORE/residual6040_20260908/merged/probmean_shared6144_random4096_allmembers_seed42/kv_retrieval/online_metrics.jsonl",
+  "shared_metrics": "/RESTORE/llama_kv_probmean_compact_20260906/merged/probmean_shared_compact10240/kv_retrieval/online_metrics.jsonl",
+  "smoke_data": "/RESTORE/llama_kv_probmean_compact_20260906/data/0_3/filtered_data/kv_retrieval.jsonl",
+  "task_config_dir": "/RESTORE/infinitebench_benchmark_specific_calibration/task_configs",
+  "dataset_loader": "/RESTORE/FlexPrefill/experiments/benchmark/infinitebench/data/InfiniteBench.py",
+  "flexprefill_root": "/mmfs1/project/yl258/jz648/sparseAttention/FlexPrefill"
+}

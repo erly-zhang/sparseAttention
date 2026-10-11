@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>J-lens · Own-generation explorer</title>
+<link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+<header>
+  <div class="eyebrow">HMMT · QWEN3-4B · OWN-GENERATION PILOT</div>
+  <h1>Each method generates its own reasoning</h1>
+  <p class="subtitle">Compare the five methods’ own text, then inspect their J-lens readouts at captured positions and layers.</p>
+  <div class="badges"><span>3 questions · 15 own-generated traces</span><span>K = 2048</span><span>Protected prompt + recent64</span><span>Compaction every 64 steps</span><span>Works offline</span><span>English interface · Own prefixes</span></div>
+</header>
+<main>
+<section class="toolbar" aria-label="Select experiment and position">
+  <label>Sample <select id="sample"><option value="0">HMMT · 0</option><option value="1">HMMT · 1</option><option value="2">HMMT · 2</option></select></label>
+  <label>Method <select id="arm"><option value="dense">Dense</option><option value="full_random">Random · Full KV</option><option value="full_w1">W1 · Full KV</option><option value="compact_random">Random · Compact KV</option><option value="compact_w1" selected>W1 · Compact KV</option></select></label>
+  <label>Position <select id="position"></select></label>
+  <label>Layer <select id="layer"></select></label>
+  <button id="previous" title="Previous captured position">←</button><button id="next" title="Next captured position">→</button>
+  <label class="check"><input type="checkbox" id="reasoningOnly" checked> Reasoning only</label><label class="check"><input type="checkbox" id="commonOnly"> Same prefix as Dense only</label>
+</section>
+<div class="status" id="status" role="status">Loading local data…</div>
+<div class="displaynotice important"><strong>Free generation, not Dense-text replay.</strong> Each method samples its own next token. All 15 traces reached the 4,096-token cap without a complete final boxed answer. After text divergence, same-step readout differences also reflect different text histories.</div>
+<div class="displaynotice"><strong>English-character token display.</strong> Grids and readout lists show the Top 8 ASCII letter/number tokens selected from the full vocabulary. Token ranks and probabilities remain full-vocabulary quantities; Recall@25 and JS also use the original full vocabulary.</div>
+<details class="prompt" open><summary>Original prompt <span id="promptCount"></span></summary><pre id="prompt"></pre></details>
+<section class="generation-summary panel"><div class="panelhead"><h2>Own-generation results for this question</h2><span class="muted">One seeded rollout per method · No accuracy estimate from capped traces</span></div><div class="table-scroll" id="runSummary"></div></section>
+<section class="text-comparison panel">
+<div class="panelhead"><div><h2>Compare the actual generated text</h2><p>These are independent continuations. Changing Method also changes the J-lens data below.</p></div><label>Compare with <select id="compareMethod"></select></label></div>
+<div id="pairInfo" class="pair-info"></div>
+<div class="text-columns"><article><h3 id="textLeftTitle"></h3><div id="diffLeft" class="diff-snippet"></div><details open><summary>Full own-generated text</summary><pre id="textLeft"></pre></details></article><article><h3 id="textRightTitle"></h3><div id="diffRight" class="diff-snippet"></div><details open><summary>Full own-generated text</summary><pre id="textRight"></pre></details></article></div>
+</section>
+<section class="context"><div class="section-kicker">Selected method’s own text at the captured position</div><div id="context"></div><div id="positionInfo" class="muted"></div><p class="muted">The highlighted token was consumed at this checkpoint. Text to its right was generated later and was not supplied to this forward pass.</p><div id="prefixNotice" class="prefix-notice"></div></section>
+<section class="pinbar">
+  <div><strong>Pinned tokens</strong><span class="muted"> Click a readout token to pin or unpin it; display up to 4 at once.</span></div>
+  <div id="pins"></div>
+  <div class="searchrow"><label>Search exported tokens <input id="search" placeholder="e.g. probably, sum, numbers" autocomplete="off"></label><select id="searchResults" aria-label="Search results"></select><button id="addPin">Pin</button><button id="clearPins">Clear</button><label class="check"><input type="checkbox" id="baseline" checked> Overlay Dense ranks at the same step</label></div>
+</section>
+<section class="explorer">
+  <div class="matrices">
+    <article class="panel">
+      <div class="panelhead"><div><h2>Position × layer: top English-character token</h2><p>Each column is a captured checkpoint. Scroll horizontally for more positions; click a cell to select its position and layer.</p></div><div class="legend"><i class="different"></i> Top token differs from Dense at the same step</div></div>
+      <div class="matrix-wrap"><div class="layer-axis" id="topAxis"></div><div class="matrix-scroll" id="topScroll"><canvas id="topGrid" aria-label="Top-token grid by position and layer"></canvas></div></div>
+      <div class="matrix-caption"><span>Light gray: before sparsity begins</span><span>Orange outline: current selection</span><span>Δ: text prefix differs from Dense</span><span>Block indices: 0–35</span></div>
+    </article>
+    <article class="panel">
+      <div class="panelhead"><div><h2>Full-vocabulary rank of a pinned token</h2><p>Each cell prints the full-vocabulary rank of the same pinned token. Smaller numbers and darker colors indicate a higher rank; a range denotes a tie.</p></div><label>Heatmap token <select id="heatToken"></select></label></div>
+      <div class="ranklegend"><div class="gradient"><span style="left:0">1</span><span style="left:19.3%">10</span><span style="left:38.6%">100</span><span style="left:57.9%">1,000</span><span style="left:77.2%">10,000</span><span style="left:100%">Vocab end</span></div></div>
+      <div id="rankState" class="rank-state" role="status">Select a pinned token to view its ranks.</div>
+      <div class="rank-shell"><div class="matrix-wrap"><div class="layer-axis" id="rankAxis"></div><div class="matrix-scroll" id="rankScroll"><canvas id="rankGrid" aria-label="Pinned-token full-vocabulary rank heatmap"></canvas></div></div><div id="rankEmpty" class="rank-empty"><strong>No token selected</strong><span>Click any readout token to pin it, then choose it in the Heatmap token menu.</span><button id="pinCurrentTop">Pin selected cell’s top token</button></div></div>
+    </article>
+  </div>
+  <div class="slices">
+    <article class="panel"><div class="panelhead"><div><h2>Fixed position → layer slice</h2><p id="layerSubtitle"></p></div></div><div id="layerReadouts" class="readouts"></div><div class="charthead">Pinned-token ranks across layers <span class="muted">Dashed = Dense</span></div><div id="layerChart" class="chart"></div></article>
+    <article class="panel"><div class="panelhead"><div><h2>Fixed layer → position slice</h2><p id="positionSubtitle"></p></div></div><div id="positionReadouts" class="readouts"></div><div class="charthead">Pinned-token ranks across positions <span class="muted">x-axis = actual decode step</span></div><div id="positionChart" class="chart"></div><p class="chartnote">Lines connect measured checkpoints only; gaps contain no observations. Dashed = Dense; shading marks the selected method’s sparse phase.</p></article>
+    <article class="panel cellpanel"><div class="panelhead"><div><h2>Selected cell · English-character Top 8</h2><p>Top 8 ASCII tokens containing letters or numbers; ranks and probabilities use the full vocabulary.</p></div></div><div id="cellMetrics"></div><div id="cellReadout"></div></article>
+  </div>
+</section>
+<details class="methods"><summary>Reading guide · Methods, limitations, and sources</summary>
+<p>Each method independently samples its next token using temperature 0.6, top-p 0.95, batch1 and a private seed42/input-identity random generator. The five methods share the original prompt, not the subsequent token history. Same-step comparisons after divergence are descriptive comparisons of different histories. They do not isolate attention damage.</p>
+<p>All 15 traces reached 4,096 generated tokens. Question0 and Question2 remain in the think span; Question1 closes the think span but its final explanation is truncated before a complete boxed answer. Intermediate correct values are not scored as completed final responses. This is not a formal accuracy or efficiency benchmark.</p>
+<p>Top8 displays ASCII tokens containing a letter or number. The filter affects display only; ranks, probabilities, Recall@25 and JS use the full vocabulary. Original generated text is preserved without translation. Rank heatmaps track one fixed pinned token, and every cell prints its exact rank or finite-precision tie interval.</p>
+<p>Readout: <span class="formula">p<sub>ℓ</sub>(v|h) = softmax(W<sub>U</sub> RMSNorm(J<sub>ℓ</sub> h))<sub>v</sub></span>. Block35 uses J=I. Readout probabilities are before generation temperature and top-p processing. The same frozen Qwen3-4B lens is used for all methods; it was fitted on 479 WikiText sequences of up to128 tokens. It is an average Dense Jacobian, not the exact Jacobian of each sparse path or current reasoning position.</p>
+<p>Dense prefill; total K=2048 includes all prompt tokens and recent64. Full KV methods keep the entire history and select before every decode attention. Compact methods attend to surviving KV, then select and physically compact every64 steps when the cache exceeds K. Positions are shared across KV heads within a layer. W1 scores with a current-query representative Q head; Random uses independent Uniform scores and TopK.</p>
+<p>Checkpoints occur every128 steps and near sparse boundaries; columns do not represent every token and their spacing is unequal. Each method has its own reasoning-phase labels and context snippets. Step0 captures the last prompt token; step t captures state after consuming t continuation tokens. The final checkpoint is an extra unsampled forward of the last emitted token. Original RoPE positions are retained; abs=prompt_tokens+step−1.</p>
+<p>Same prefix as Dense only filters to positions before this method’s first differing consumed token. It can include active sparsity. After divergence, Dense overlays and same-step metrics compare different text histories. Rank lines connect measured checkpoints only. No workspace band, capacity loss, or causal explanation of accuracy is established by these three questions.</p>
+<p>Exported from saved residuals without new text generation. Input hashes, pre-sparse residual equality and actual pair counts passed. Every Top8 ID and rank bound is checked against the original A100 readout files; exact full-vocabulary rank streams are independently decoded. Layout follows the earlier local Figure5-style viewer; the earlier fixed-Dense-prefix viewer remains unchanged.</p>
+<p><a href="manifest.json" target="_blank">Provenance manifest</a> · <a href="results.csv" target="_blank">Per-trace results</a> · <a href="qualitative_observations_en.txt" target="_blank">English qualitative observations</a> · <a href="prefix_stratified_jlens_summary.json" target="_blank">Readout strata</a> · <a href="https://transformer-circuits.pub/2026/workspace/index.html" target="_blank" rel="noopener">Figure5 inspiration</a></p>
+</details>
+<details class="prompt"><summary id="continuationTitle">Selected method’s full own-generated continuation</summary><pre id="continuation"></pre><a id="rawTextLink" download>Download this original text</a></details>
+<footer>Own-generation J-lens explorer · Local offline package · 2026-10-07 <span id="provenance"></span></footer>
+</main>
+<div id="tooltip" role="tooltip" hidden></div>
+<script src="viewer.js"></script>
+</body></html>

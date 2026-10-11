@@ -40,3 +40,29 @@ duo-attention/
 *.swp
 .idea/
 .vscode/
+
+# Local frozen runs and diagnostic artifacts (keep on disk, publish code only)
+experiments/**/results/
+experiments/**/snapshots/
+experiments/**/audits/
+experiments/**/reports/
+experiments/**/frozen/
+experiments/**/captures/
+experiments/**/html/
+experiments/**/html_en/
+experiments/**/html_en_v2/
+experiments/**/html_en_v3/
+experiments/**/plots/
+experiments/**/figures/
+experiments/**/figure5_html*/
+experiments/**/staged_*/
+experiments/jspace_dense_sparse_20261007/assets/
+experiments/jspace_dense_sparse_20261007/analysis/
+experiments/learned_mask_stage1_20260914_debug1/
+environment-validation.json
+
+# Editor metadata and old iteration copies
+._*
+*.backup.*
+*.before_*
+*.orig

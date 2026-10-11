@@ -1,0 +1,30 @@
+{
+  "sample_ids": [
+    0,
+    1,
+    2
+  ],
+  "methods": [
+    "dense",
+    "full_random",
+    "full_w1",
+    "compact_random",
+    "compact_w1"
+  ],
+  "max_new_tokens": 4096,
+  "total_K": 2048,
+  "protection": "prompt+recent64_inside_total_K",
+  "compact_interval": 64,
+  "window": 1,
+  "temperature": 0.6,
+  "top_p": 0.95,
+  "seed": 42,
+  "batch_size": 1,
+  "dtype": "BF16",
+  "teacher_forced": false,
+  "accuracy_benchmark": false,
+  "source_sha256": {
+    "free_generate.py": "f475d8e38c2465c37f4773248aa1c80be3895b6817291e55fe087885f85d100c",
+    "worker.sbatch": "02a13823abd90d80ae290d79874e60d0b604ab0e233a994c717a0c63f72c17dc"
+  }
+}

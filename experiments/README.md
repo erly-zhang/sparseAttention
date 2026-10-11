@@ -3,6 +3,12 @@
 This directory contains the project-specific LongBench-v2 sparse-attention
 experiments used for the aligned Stage-2 comparison.
 
+The decode-time reasoning work is documented separately in
+[reasoning_qhead_shared_topp_20260918/README.md](reasoning_qhead_shared_topp_20260918/README.md).
+It uses Qwen3-4B and includes W1, shared random selection, full-history KV,
+periodic physical compression and official `random_pp` controls. Its runtime
+environment and generation budgets differ from the Stage-2 setup below.
+
 The code is designed around one canonical evaluation split:
 
 - 3 head-selection samples, used only to choose representative heads.

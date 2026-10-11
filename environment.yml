@@ -1,0 +1,10 @@
+# Create the base environment, then follow ENVIRONMENT.md for CUDA dependencies.
+name: sparseattention
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.10
+  - pip
+variables:
+  PYTHONNOUSERSITE: "1"

@@ -1,0 +1,12 @@
+{
+  "url": "https://github.com/SalesforceAIResearch/Random-Attention",
+  "commit": "64db9688a12f0926db45fec039370f6ceb1ab4fe",
+  "upstream_main_verified": true,
+  "files": {
+    "THIRD_PARTY_NOTICES.md": "344f71609617dcef9af1a97a60f685f9d845a876d91b51f2baa147f4c579629f",
+    "run_cell.sh": "1db3964c09dde7f2bd3abd3dc0cbd6648bc5f0d668395690031629035f5c6aa6",
+    "cache_utils.py": "3631cd01440df412bc8cd26cbe320e5eef29dc58ab7115ae25e5c73168c709d7",
+    "__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "LICENSE.txt": "7f32b32434490332df34d81b4b91f310f5885920ecb9890774b38b772f08c660"
+  }
+}

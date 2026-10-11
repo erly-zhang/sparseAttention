@@ -11,6 +11,18 @@ from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
 from flash_attn import flash_attn_with_kvcache
 
 
+def cache_attention(layer, query, key, value, scale):
+    """Route full-history shared masks before attention; legacy eviction stays separate."""
+    if getattr(layer, 'uses_temporary_mask', False) or getattr(layer, 'records_attention_metrics', False):
+        return layer.attention(query, key, value, scale)
+    kc, vc, lengths = layer.prepare(key, value)
+    output = flash_attn_with_kvcache(query, kc, vc, k=key, v=value,
+                                   cache_seqlens=lengths, causal=True,
+                                   softmax_scale=scale, window_size=(-1, -1))
+    layer.post_attention_update(key.shape[1])
+    return output
+
+
 def wrap_evict_attn_forward(model_name_or_path):
     def qwen3_evict_attn_forward(
         self,
@@ -39,21 +51,7 @@ def wrap_evict_attn_forward(model_name_or_path):
         key_states = key_states.transpose(1, 2).contiguous()
         value_states = value_states.transpose(1, 2).contiguous()
 
-        k_cache, v_cache, cache_seqlens = layer.prepare(key_states, value_states)
-
-        # Fused append-and-attend: writes new key_states/value_states at offset cache_seqlens
-        # then attends over [0, cache_seqlens + L_new) per row.
-        attn_output = flash_attn_with_kvcache(
-            query_states, k_cache, v_cache,
-            k=key_states, v=value_states,
-            cache_seqlens=cache_seqlens,
-            causal=True,
-            softmax_scale=self.scaling,
-            window_size=(-1, -1), # assert self.sliding_window is None
-        )
-
-        # Advance cache_seqlens; may conduct eviction when the cache is full
-        layer.post_attention_update(key_states.shape[1])
+        attn_output = cache_attention(layer, query_states, key_states, value_states, self.scaling)
 
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
@@ -93,21 +91,7 @@ def wrap_evict_attn_forward(model_name_or_path):
         key_states = key_states.transpose(1, 2).contiguous()
         value_states = value_states.transpose(1, 2).contiguous()
 
-        k_cache, v_cache, cache_seqlens = layer.prepare(key_states, value_states)
-
-        # Fused append-and-attend: writes new key_states/value_states at offset cache_seqlens
-        # then attends over [0, cache_seqlens + L_new) per row.
-        attn_output = flash_attn_with_kvcache(
-            query_states, k_cache, v_cache,
-            k=key_states, v=value_states,
-            cache_seqlens=cache_seqlens,
-            causal=True,
-            softmax_scale=self.scaling,
-            window_size=(-1, -1), # phi-4-reasoning: sliding_window is None
-        )
-
-        # Advance cache_seqlens; may conduct eviction when the cache is full
-        layer.post_attention_update(key_states.shape[1])
+        attn_output = cache_attention(layer, query_states, key_states, value_states, self.scaling)
 
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
@@ -141,21 +125,7 @@ def wrap_evict_attn_forward(model_name_or_path):
         key_states = key_states.transpose(1, 2).contiguous()
         value_states = value_states.transpose(1, 2).contiguous()
 
-        k_cache, v_cache, cache_seqlens = layer.prepare(key_states, value_states)
-
-        # Fused append-and-attend: writes new key_states/value_states at offset cache_seqlens
-        # then attends over [0, cache_seqlens + L_new) per row.
-        attn_output = flash_attn_with_kvcache(
-            query_states, k_cache, v_cache,
-            k=key_states, v=value_states,
-            cache_seqlens=cache_seqlens,
-            causal=True,
-            softmax_scale=self.scaling,
-            window_size=(-1, -1), # Llama-3.1: full attention, sliding_window is None
-        )
-
-        # Advance cache_seqlens; may conduct eviction when the cache is full
-        layer.post_attention_update(key_states.shape[1])
+        attn_output = cache_attention(layer, query_states, key_states, value_states, self.scaling)
 
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)

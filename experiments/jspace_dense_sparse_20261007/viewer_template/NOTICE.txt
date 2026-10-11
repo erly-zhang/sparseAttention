@@ -1,0 +1,1 @@
+Meaningful-token display filter: Copyright 2026 Anthropic PBC, Apache-2.0. Used from jlens.vis._meaningful_token_mask. The checkpoint/multi-arm export and HTML/CSS/JS viewer are new local code; Figure 5 supplies the visualization inspiration. Paper artwork is not redistributed.
