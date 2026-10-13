@@ -1,0 +1,12 @@
+{
+  "user_authorization": "smoke可以现在目前的vscode-g上跑",
+  "allocation": "47082259",
+  "node": "gl002",
+  "gpu": "L40S48GB",
+  "model_dtype_input_generation_unchanged": true,
+  "allocator": "expandable_segments:True",
+  "new_resource_request": false,
+  "wall_timeout_seconds": 1740,
+  "prior_H100_allocation_seconds": 4976,
+  "replacement_for_pending_smoke_job": "47104554"
+}

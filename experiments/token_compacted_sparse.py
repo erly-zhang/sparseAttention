@@ -3021,7 +3021,10 @@ class RepresentativeTokenFirstBlockSelector:
                 raise RuntimeError("Fixed token target budget is missing")
             target_k = min(self.target_token_budget, seq_len)
             _, target_indices = torch.topk(
-                token_scores, k=target_k, dim=-1, sorted=False
+                # The rank mask below keeps only min(query_end, target_k)
+                # entries. Sort so finite causal keys precede future -inf keys;
+                # an unordered TopK can otherwise discard valid early keys.
+                token_scores, k=target_k, dim=-1, sorted=True
             )
             target_keep_counts = torch.minimum(
                 query_ends,
@@ -4348,6 +4351,11 @@ def install_grouped_token_compacted_flexprefill(
     force_diagonal_target_tokens: bool = False,
     target_protected_token_span: int = 128,
     selection_mode: str = "per_block_top_p",
+    masa_norm_alpha: float = 0.0,
+    masa_clip_percentile: Optional[float] = None,
+    masa_query_chunk_size: int = 16,
+    masa_query_mode: str = "four_probe",
+    masa_full_query_chunk_size: int = 128,
     candidate_block_count: int = 256,
     final_token_budget: Optional[int] = 8192,
     maximum_selected_blocks: Optional[int] = None,
@@ -4473,7 +4481,7 @@ def install_grouped_token_compacted_flexprefill(
             token_selection_mode="block_mass_weighted_average",
             probe_weights=probe_weights,
         )
-    elif selection_mode == "token_first_block_cover":
+    elif selection_mode in {"token_first_block_cover", "token_first_masa"}:
         selector_kwargs = dict(
             logical_key_block_size=logical_key_block_size,
             target_token_budget=(
@@ -4524,7 +4532,21 @@ def install_grouped_token_compacted_flexprefill(
             oracle_member_topk_budget=oracle_member_topk_budget,
             oracle_head_chunk_size=oracle_head_chunk_size,
         )
-        if per_head_selection:
+        if selection_mode == "token_first_masa":
+            if per_head_selection:
+                raise ValueError("MASA sharing requires group representative selection")
+            from experiments.masa_token_scoring import RepresentativeMASATokenSelector
+
+            selector = RepresentativeMASATokenSelector(
+                group_config,
+                masa_norm_alpha=masa_norm_alpha,
+                masa_clip_percentile=masa_clip_percentile,
+                masa_query_chunk_size=masa_query_chunk_size,
+                masa_query_mode=masa_query_mode,
+                masa_full_query_chunk_size=masa_full_query_chunk_size,
+                **selector_kwargs,
+            )
+        elif per_head_selection:
             selector = ChunkedPerHeadTokenFirstSelector(
                 group_config,
                 num_q_heads=int(model.config.num_attention_heads),

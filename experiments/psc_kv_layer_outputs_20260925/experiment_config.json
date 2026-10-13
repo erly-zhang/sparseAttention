@@ -1,0 +1,102 @@
+{
+  "experiment": "PSC new controlled experiment",
+  "trajectory": "each_method_own_end_to_end",
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "dtype": "bfloat16",
+  "batch_size": 1,
+  "seed": 42,
+  "calibration_indices": [
+    0,
+    1,
+    2
+  ],
+  "test_index": 3,
+  "input_tokens": 123959,
+  "maxcontext": 131072,
+  "input_limit": 130944,
+  "capture_points": [
+    "attention_post_o_proj_before_residual",
+    "full_transformer_block_output"
+  ],
+  "methods": {
+    "dense": {
+      "backend": "flash_attention_2"
+    },
+    "routing_c": {
+      "routing": "original_position % 32",
+      "visibility": "same routed group + original causal",
+      "output": "scatter M then explicit repeat32 full original o_proj",
+      "full_qkv": true,
+      "full_kv_cache": true
+    },
+    "shared6144_member2q4096": {
+      "implementation": "original Selector(mode=member2q) and original token-compacted Triton kernel",
+      "representatives": 3,
+      "representative_budget": 10240,
+      "member_core_budget": 6144,
+      "member_residual_budget": 4096,
+      "query_tile": 128,
+      "token_chunk_size": 32,
+      "sink": 128,
+      "local": "current real query tile",
+      "groups": "PSC generated original AE K=3"
+    },
+    "flexprefill": {
+      "official_source": "local pinned FlexPrefill",
+      "gamma": 0.95,
+      "tau": 0.1,
+      "min_budget": 1024,
+      "max_budget": null,
+      "block_size": 128
+    },
+    "minference": {
+      "package": "0.1.6.0",
+      "model_key": "meta-llama/Llama-3.1-8B-Instruct",
+      "pattern": "Llama_3.1_8B_Instruct_128k_kv_out_v32_fit_o_best_pattern_v2.json",
+      "kv_type": "default full cache"
+    }
+  },
+  "ae": {
+    "map_size": 1936,
+    "latent_dim": 64,
+    "max_epochs": 1000,
+    "patience": 30,
+    "min_delta": 1e-07,
+    "batch_size": 1,
+    "optimizer": "Adam",
+    "learning_rate": 0.001,
+    "training_items": 921,
+    "validation_items": 103,
+    "clustering": "L2-normalized latent, Ward linkage, cut_tree K=3, Euclidean medoid",
+    "grouping_independent_of_validation": false,
+    "NN_method_included": false
+  },
+  "budget": {
+    "gpus": 1,
+    "type": "h100-80",
+    "partition": "GPU-shared",
+    "account": "cis260309p",
+    "slurm_seconds": 3600,
+    "pipeline_deadline_seconds": 3500,
+    "timeout_seconds": 3550,
+    "reserve_for_clustering_and_comparisons_seconds": 900,
+    "reserve_is_estimate_not_guarantee": true,
+    "training_gate": "1.25 * measured epoch_seconds * earliest31epochs <= remaining - reserve",
+    "if_incomplete": "record failure; no method/sample/config change or automatic resubmit"
+  },
+  "storage_estimates_GiB": {
+    "calibration_maps": 21.44677734375,
+    "mean_maps": 14.2978515625,
+    "dense_reference_two_points": 60.52685546875,
+    "full_prompt_kv": 15.1317138671875
+  },
+  "metrics": {
+    "relative_l2": "whole-layer Frobenius norm(error)/norm(dense)",
+    "rmse": "sqrt(sum squared error / valid token-feature elements)",
+    "cosine": "mean per valid-token feature-vector cosine",
+    "KL": "mean token KL(softmax(dense/T)||softmax(method/T)), T=1, nats",
+    "padding": "none batch1; all valid original model-input positions; generic metric masks padding",
+    "zero_norm": "both-zero cosine=1; one-zero cosine=0; relativeL2=null if ref zero and error nonzero"
+  },
+  "scope": "prefill only, no generation, no task accuracy claims"
+}

@@ -1,0 +1,83 @@
+{
+  "model": "/ocean/projects/cis260309p/jzhang114/prefill-routing-deps/models/Llama-3.1-8B-Instruct",
+  "methods": [
+    "dense_full",
+    "representative_autoblock",
+    "representative_token",
+    "representative_token_vertical"
+  ],
+  "layers": [
+    0,
+    2,
+    4,
+    6,
+    8,
+    10,
+    12,
+    14,
+    16,
+    18,
+    20,
+    22,
+    24,
+    26,
+    28,
+    30
+  ],
+  "selection": {
+    "query_tile_size": 128,
+    "probe_weights": [
+      0.2,
+      0.3,
+      0.4,
+      0.1
+    ],
+    "logical_key_block_sizes": [
+      32,
+      64,
+      128
+    ],
+    "minimum_block_coverage_ratio": 0.125,
+    "vertical_queries": 128,
+    "vertical_gamma": 0.95,
+    "vertical_max_tokens": null,
+    "token_chunk_size": 32,
+    "target_token_budget": 8192,
+    "target_token_top_p": null,
+    "autoblock_final_token_budget": 8192,
+    "adaptive_coverage_tolerance": 0.02,
+    "autoblock_force_sink": true,
+    "autoblock_force_diagonal": true,
+    "token_force_sink": false,
+    "token_force_diagonal": false
+  },
+  "calibration": {
+    "samples": 3,
+    "queries": 128,
+    "query_chunk_size": 4,
+    "seed": 20261001,
+    "selection": "directional_coverage_majority_vote_then_voter_score_then_lowest_head"
+  },
+  "pilot": {
+    "samples_per_task": 2,
+    "seed": 42,
+    "gpus": 1,
+    "gpu": "h100-80",
+    "cpus": 8,
+    "memory_gb": 128,
+    "walltime_hours": 4
+  },
+  "formal": {
+    "samples_per_task": 50,
+    "gpus": 4,
+    "gpu": "h100-80",
+    "cpus": 8,
+    "memory_gb": 128,
+    "walltime_hours": 24
+  },
+  "generation_seed": 42,
+  "prefill_only": true,
+  "full_kv_cache": true,
+  "dense_decode": true,
+  "training": false
+}

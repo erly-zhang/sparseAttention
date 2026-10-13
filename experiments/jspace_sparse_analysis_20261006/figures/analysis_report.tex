@@ -1,0 +1,23 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.8in]{geometry}\usepackage{fontspec}\usepackage{graphicx}\usepackage{booktabs}\usepackage{hyperref}
+\usepackage{pdfpages}
+\setmainfont[Path=/ocean/projects/cis260309p/jzhang114/sparseAttention/reports/mask_flexprefill_results_20261002/fonts/,BoldFont=TimesNewRoman-Bold.ttf,ItalicFont=TimesNewRoman-Italic.ttf]{TimesNewRoman-Regular.ttf}
+\begin{document}\begin{center}\Large Dense--Sparse Prefill: J-lens and J-space Analysis\end{center}
+\noindent Llama-3.1-8B-Instruct; four InfiniteBench tasks, 50 prompts per task; seven methods, all 32 layers. J-lens fitted on 1,000 independent WikiText sequences of 128 tokens.
+\paragraph{Scope.} These measurements compare internal representations while the model reads each full long-context prompt. Activations were saved at sampled prefix, tail, uniformly spaced and retrieval-evidence positions. They do not contain generated reasoning or new answers. Historical task scores are association labels, not newly measured accuracy.
+\paragraph{Readout differences.} Random-head methods show larger mean tail readout divergence than the corresponding calibrated-head methods on all four tasks. Adding slash reduces calibrated-head tail divergence on all four tasks; for random heads, the KV Retrieval divergence increases slightly. This is a readout comparison, not evidence that a particular reasoning step was lost or restored. Sparse variants are not matched in attention budget.
+\begin{center}\begin{tabular}{lrrrr}\toprule Method & KV Retrieval & En.MC & En.QA & Code.Debug\\\midrule
+Dense & 0.0000 & 0.0000 & 0.0000 & 0.0000 \\
+Calibrated V & 0.0627 & 0.0240 & 0.0200 & 0.0349 \\
+Calibrated V+S & 0.0431 & 0.0149 & 0.0131 & 0.0186 \\
+Random V & 0.0736 & 0.0608 & 0.0523 & 0.0831 \\
+Random V+S & 0.0762 & 0.0543 & 0.0466 & 0.0702 \\
+FlexPrefill & 0.0128 & 0.0157 & 0.0115 & 0.0243 \\
+MInference & 0.0448 & 0.0301 & 0.0262 & 0.0373 \\
+\bottomrule\end{tabular}\end{center}
+\noindent Table: mean tail JS divergence from Dense in nats, averaged within prompts and over layers. Dense has zero self-divergence.
+\paragraph{Historical replay checks.} The prefill audit covers 1,400 paired observations. 1,398 reproduce the historical first predicted token, and 1,357 have bitwise-equal final logits. Replay flags are retained; agreement of one token does not establish agreement of a generated answer.
+\paragraph{Readout quality.} The original 551-item concept test shows J-lens outperforming Logit Lens in five categories at Top-10 recovery, but not poetry. Short-text validation does not by itself establish long-context interpretation quality.
+\paragraph{J-space decomposition.} Unit-normalized token directions include the model's final RMSNorm gains. A local nonnegative gradient-pursuit implementation uses at most 16 or 25 selected atoms, with all vocabulary tokens eligible. We compare uncentered residual energy reconstructed with a seeded orthogonal-rotation control preserving dictionary norms and Gram matrix. This is not labeled centered variance explained. Independently fitted Dense and Sparse supports need not be unique, and may exchange correlated token directions. The signed projection of Sparse--Dense change onto Dense active directions is reported separately from the nonnegative reconstruction. The decomposition and all original input hashes passed the final audit.
+\clearpage\includepdf[pages=-]{prefill_analysis.pdf}
+\end{document}

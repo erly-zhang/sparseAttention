@@ -74,6 +74,7 @@ SHAREPREFILL_METHODS = {
     "shareprefill_ae3_token_block_auto_dense_topp_mass",
     "shareprefill_per_head_token_topk",
     "shareprefill_ae3_representative_token_topk",
+    "shareprefill_ae3_representative_token_masa",
     "shareprefill_per_head_token_block_auto",
 }
 
@@ -210,6 +211,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--limit", type=int, default=-1)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--masa_norm_alpha", type=float, default=0.0,
+                        help="MASA Eq. 10 norm balancing exponent, in [0,1].")
+    parser.add_argument("--masa_clip_percentile", type=float, default=None,
+                        help="MASA Eq. 11 value norm clipping percentile, in (0,100].")
+    parser.add_argument("--masa_query_chunk_size", type=int, default=16,
+                        help="Query tiles per MASA scoring chunk; does not change selection.")
+    parser.add_argument("--masa_query_mode", choices=["four_probe", "all_queries"], default="four_probe")
+    parser.add_argument("--masa_full_query_chunk_size", type=int, default=128,
+                        help="Actual query rows per scoring chunk in all_queries mode.")
     parser.add_argument("--chat", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--group_config")
     parser.add_argument(
@@ -567,6 +577,11 @@ def main() -> None:
         record_sparsity=args.record_sparsity or args.dump_selector_details,
         block_f_beta=args.block_f_beta,
         fixed_topk_budget=args.fixed_topk_budget,
+        masa_norm_alpha=args.masa_norm_alpha,
+        masa_clip_percentile=args.masa_clip_percentile,
+        masa_query_chunk_size=args.masa_query_chunk_size,
+        masa_query_mode=args.masa_query_mode,
+        masa_full_query_chunk_size=args.masa_full_query_chunk_size,
         target_token_top_p=args.target_token_top_p,
         target_top_p_start_layer=args.target_top_p_start_layer,
         watched_key_ranges=tuple(args.watched_key_ranges),

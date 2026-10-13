@@ -1,0 +1,179 @@
+{
+  "model": "/ocean/projects/cis260309p/jzhang114/prefill-routing-deps/models/Llama-3.1-8B-Instruct",
+  "methods": [
+    "dense_full",
+    "coverage_token_vertical",
+    "coverage_token_vertical_slash",
+    "random_token_vertical",
+    "random_token_vertical_slash",
+    "flexprefill",
+    "minference"
+  ],
+  "layers": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31
+  ],
+  "selection": {
+    "query_tile_size": 128,
+    "probe_weights": [
+      0.2,
+      0.3,
+      0.4,
+      0.1
+    ],
+    "logical_key_block_sizes": [
+      32,
+      64,
+      128
+    ],
+    "minimum_block_coverage_ratio": 0.125,
+    "vertical_queries": 128,
+    "vertical_gamma": 0.95,
+    "vertical_max_tokens": null,
+    "token_chunk_size": 32,
+    "target_token_budget": 8192,
+    "target_token_top_p": null,
+    "autoblock_final_token_budget": 8192,
+    "adaptive_coverage_tolerance": 0.02,
+    "autoblock_force_sink": true,
+    "autoblock_force_diagonal": true,
+    "token_force_sink": false,
+    "token_force_diagonal": false,
+    "slash_gamma": 0.95,
+    "slash_max_offsets": null
+  },
+  "calibration": {
+    "samples": 3,
+    "queries": 128,
+    "query_chunk_size": 4,
+    "seed": 20261001,
+    "selection": "directional_coverage_majority_vote_then_voter_score_then_lowest_head",
+    "random_head_seed": 20261001
+  },
+  "formal": {
+    "samples_per_task": 50,
+    "gpus": 70,
+    "gpu": "h100-80",
+    "cpus": 8,
+    "memory_gb": 128,
+    "walltime_hours": 8,
+    "shards": 10,
+    "max_concurrent_workers": 70,
+    "qos": "push",
+    "samples_per_worker": 20
+  },
+  "generation_seed": 42,
+  "prefill_only": true,
+  "full_kv_cache": true,
+  "dense_decode": true,
+  "training": false,
+  "scenarios": {
+    "coverage_token_vertical": {
+      "head_strategy": "coverage",
+      "selector_method": "representative_token_vertical"
+    },
+    "coverage_token_vertical_slash": {
+      "head_strategy": "coverage",
+      "selector_method": "representative_token_vertical_slash"
+    },
+    "random_token_vertical": {
+      "head_strategy": "random",
+      "selector_method": "representative_token_vertical"
+    },
+    "random_token_vertical_slash": {
+      "head_strategy": "random",
+      "selector_method": "representative_token_vertical_slash"
+    }
+  },
+  "calibration_job": {
+    "gpus": 3,
+    "gpu": "h100-80",
+    "cpus": 8,
+    "memory_gb": 128,
+    "walltime_hours": 2,
+    "qos": "push"
+  },
+  "baseline_layers": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31
+  ],
+  "baselines": {
+    "flexprefill": {
+      "gamma": 0.95,
+      "tau": 0.1,
+      "min_budget": 1024,
+      "max_budget": null,
+      "block_size": 128
+    },
+    "minference": {
+      "pattern_file": "/ocean/projects/cis260309p/jzhang114/sparseAttention/experiments/psc_kl_quality_retry02_20260927/overlay/minference/configs/Llama_3.1_8B_Instruct_128k_kv_out_v32_fit_o_best_pattern_v2.json",
+      "starting_layer": 0,
+      "ratio": 1
+    }
+  },
+  "resource_policy": {
+    "priority": "time_to_completion",
+    "aggregate_gpu_hours_limit": null,
+    "scheduler_job_limit_only": true
+  }
+}

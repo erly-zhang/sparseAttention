@@ -1,0 +1,18 @@
+{
+  "source_experiment": "../jlens_prefill_analysis_20261005",
+  "source_analysis": "../jspace_sparse_analysis_20261006",
+  "sample": "kv_retrieval-359",
+  "methods": ["dense_full", "coverage_token_vertical_slash", "flexprefill"],
+  "activation_method": "coverage_token_vertical_slash",
+  "layers": [16, 24, 28],
+  "sites": ["source_after", "prompt_end"],
+  "steering_strengths": [0.1, 0.3, 1.0],
+  "steering_conditions": ["steer_first", "steer_full", "steer_wrong", "steer_random"],
+  "patch_conditions": ["dense_value_span", "dense_orthogonal_matched", "dense_full"],
+  "generation": {"max_new_tokens": 128, "also_score_prefix_tokens": 50, "greedy": true, "dense_decode": true, "inject_during_decode": false},
+  "decomposition": {"checkpoints": [16, 25], "layers": [16, 24, 28, 31]},
+  "seed": 42,
+  "snapshot_seconds": 300,
+  "resources": {"partition": "GPU-shared", "account": "cis260309p", "qos": "push", "gpu": "h100-80:1", "cpus": 8, "memory_gb": 128, "walltime_hours": 8, "concurrent_limit": null},
+  "status": "prepared_not_submitted"
+}

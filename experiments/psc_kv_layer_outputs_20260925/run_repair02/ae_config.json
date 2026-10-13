@@ -1,0 +1,42 @@
+{
+  "command_base": [
+    "/ocean/projects/cis260309p/jzhang114/sparseAttention/experiments/psc_kv_layer_outputs_20260925/env/bin/python",
+    "-m",
+    "experiments.run_shareprefill_autoencoder_clustering"
+  ],
+  "args": [
+    "--model_name_or_path",
+    "/ocean/projects/cis260309p/jzhang114/prefill-routing-deps/models/Llama-3.1-8B-Instruct",
+    "--data_path",
+    "/ocean/projects/cis260309p/jzhang114/sparseAttention/experiments/psc_kv_layer_outputs_20260925/inputs/calibration.jsonl",
+    "--calibration_format",
+    "prompt_jsonl",
+    "--artifact_dir",
+    "/ocean/projects/cis260309p/jzhang114/sparseAttention/experiments/psc_kv_layer_outputs_20260925/ae",
+    "--head_selection_num_samples",
+    "3",
+    "--map_size",
+    "1936",
+    "--latent_dim",
+    "64",
+    "--epochs",
+    "1000",
+    "--patience",
+    "30",
+    "--min_delta",
+    "1e-7",
+    "--learning_rate",
+    "0.001",
+    "--batch_size",
+    "1",
+    "--groups",
+    "3",
+    "--seed",
+    "42",
+    "--device",
+    "cuda"
+  ],
+  "test_index_used": false,
+  "origin": "new PSC calibration 0,1,2",
+  "grouping_independent_of_validation": false
+}

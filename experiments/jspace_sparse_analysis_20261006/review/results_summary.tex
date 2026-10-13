@@ -1,0 +1,86 @@
+\documentclass[10pt]{article}
+\usepackage[margin=0.7in]{geometry}
+\usepackage{fontspec,booktabs,hyperref,pdfpages}
+\setmainfont[Path=/ocean/projects/cis260309p/jzhang114/sparseAttention/reports/mask_flexprefill_results_20261002/fonts/,BoldFont=TimesNewRoman-Bold.ttf,ItalicFont=TimesNewRoman-Italic.ttf]{TimesNewRoman-Regular.ttf}
+\setlength{\parindent}{0pt}\setlength{\parskip}{5pt}
+\newcommand{\taskheader}{Method & KV Retrieval & En.MC & En.QA & Code.Debug\\}
+\begin{document}
+\begin{center}{\Large Dense--Sparse Prefill: Reviewed Results}\end{center}
+Llama-3.1-8B-Instruct; four InfiniteBench tasks, 50 prompts per task; seven methods; all 32 layers. One Dense J-lens fitted on 1,000 WikiText-103 sequences of 128 tokens. Analysis completed October 6, 2026, 21:01 EDT.
+
+All tables average the 128 sampled prompt-tail positions within each prompt, then average over 32 layers and 50 prompts. Full long-context forwards were used; saved activations contain prompt positions, with no generated response trajectory.
+
+\textbf{Dense active token-direction recall (\%), at most 25 atoms}
+\begin{center}\begin{tabular}{lrrrr}\toprule\taskheader\midrule
+Dense & 100.00 & 100.00 & 100.00 & 100.00 \\
+Calibrated Token+Vertical & 46.15 & 62.35 & 63.24 & 56.66 \\
+Calibrated Token+Vertical+Slash & 56.70 & 67.82 & 67.89 & 64.78 \\
+Random Token+Vertical & 43.89 & 51.12 & 52.84 & 43.40 \\
+Random Token+Vertical+Slash & 43.70 & 52.93 & 54.62 & 46.47 \\
+FlexPrefill & 62.58 & 66.55 & 68.40 & 61.35 \\
+MInference & 46.22 & 58.85 & 59.79 & 54.25 \\
+\bottomrule\end{tabular}\end{center}
+Recall counts Dense's active vocabulary token IDs also active in each Sparse fit at the same layer and position. It measures exact dictionary support overlap, rather than semantic concept retention or task accuracy. All vocabulary atoms are eligible; coefficients are nonnegative.
+
+\textbf{Effect of adding Slash on support recall (percentage points)}
+\begin{center}\begin{tabular}{lrr}\toprule Task & Calibrated V+S minus V & Random V+S minus V\\\midrule
+KV Retrieval & 10.56 [9.94, 11.16] & -0.19 [-0.50, 0.12] \\
+En.MC & 5.47 [5.12, 5.84] & 1.81 [1.40, 2.21] \\
+En.QA & 4.65 [4.32, 4.96] & 1.78 [1.50, 2.08] \\
+Code.Debug & 8.12 [7.46, 8.88] & 3.07 [2.69, 3.43] \\
+\bottomrule\end{tabular}\end{center}
+Brackets show pointwise, unadjusted 95\% paired percentile bootstrap intervals: 5,000 draws of the 50 prompt IDs, after averaging layers within each prompt. Pattern variants are not matched in attention budget.
+
+\textbf{Reconstructed residual energy (\%), at most 25 atoms}
+\begin{center}\begin{tabular}{lrrrr}\toprule Task & Dense & Calibrated V+S & Dense rotated control & Dense excess (pp)\\\midrule
+KV Retrieval & 6.52 & 6.57 & 3.48 & 3.04 \\
+En.MC & 7.79 & 7.77 & 3.49 & 4.31 \\
+En.QA & 8.12 & 8.11 & 3.48 & 4.64 \\
+Code.Debug & 7.07 & 7.07 & 3.51 & 3.56 \\
+\bottomrule\end{tabular}\end{center}
+Energy is one minus squared reconstruction error divided by squared residual norm; it is uncentered. The seeded orthogonal-rotation control preserves dictionary size, atom norms and Gram matrix. Excess subtracts control energy from Dense energy.
+
+\clearpage
+\textbf{Dense active token-direction recall (\%), at most 16 atoms}
+\begin{center}\begin{tabular}{lrrrr}\toprule\taskheader\midrule
+Dense & 100.00 & 100.00 & 100.00 & 100.00 \\
+Calibrated Token+Vertical & 44.58 & 61.55 & 62.40 & 55.71 \\
+Calibrated Token+Vertical+Slash & 56.09 & 67.62 & 67.52 & 64.68 \\
+Random Token+Vertical & 42.20 & 49.69 & 51.36 & 41.99 \\
+Random Token+Vertical+Slash & 42.02 & 51.56 & 53.17 & 45.08 \\
+FlexPrefill & 62.33 & 66.34 & 68.29 & 60.92 \\
+MInference & 44.97 & 57.89 & 58.84 & 53.23 \\
+\bottomrule\end{tabular}\end{center}
+
+\textbf{Mean J-lens readout JS divergence from Dense (nats)}
+\begin{center}\begin{tabular}{lrrrr}\toprule\taskheader\midrule
+Dense & 0.0000 & 0.0000 & 0.0000 & 0.0000 \\
+Calibrated Token+Vertical & 0.0627 & 0.0240 & 0.0200 & 0.0349 \\
+Calibrated Token+Vertical+Slash & 0.0431 & 0.0149 & 0.0131 & 0.0186 \\
+Random Token+Vertical & 0.0736 & 0.0608 & 0.0523 & 0.0831 \\
+Random Token+Vertical+Slash & 0.0762 & 0.0543 & 0.0466 & 0.0702 \\
+FlexPrefill & 0.0128 & 0.0157 & 0.0115 & 0.0243 \\
+MInference & 0.0448 & 0.0301 & 0.0262 & 0.0373 \\
+\bottomrule\end{tabular}\end{center}
+This readout metric compares full-vocabulary distributions. It is distinct from the support-recall metric above.
+
+\textbf{Changes in decomposition components relative to Dense, at most 25 atoms}
+\begin{center}\begin{tabular}{lrrrr}\toprule
+& \multicolumn{2}{c}{Calibrated V+S} & \multicolumn{2}{c}{FlexPrefill}\\
+Task & Reconstruction & Remainder & Reconstruction & Remainder\\\midrule
+KV Retrieval & 0.431 & 0.268 & 0.384 & 0.185 \\
+En.MC & 0.314 & 0.162 & 0.326 & 0.163 \\
+En.QA & 0.310 & 0.166 & 0.309 & 0.151 \\
+Code.Debug & 0.348 & 0.181 & 0.377 & 0.203 \\
+\bottomrule\end{tabular}\end{center}
+Each entry is the L2 norm of the paired component change divided by the corresponding Dense component norm, before averaging. Independently fitted reconstruction and remainder changes do not form an orthogonal, additive energy partition.
+
+\textbf{Checks and metric scope}
+
+All 128 workers and 6,400 sample--layer pairs are complete, covering 44,800 method--sample--layer pairs at both sparsity settings. Source hash verification and final experiment audit: PASS. Independent review reconciles all per-layer means and checks all expected sample IDs, methods and sparsity settings. Direct tensor spot checks of token IDs, active coefficients and support recall pass on one layer-16 case per task. Floating-point arithmetic is FP32 with TF32 disabled; all 128 CPU/GPU pursuit checks pass.
+
+The local nonnegative gradient-pursuit approximation selects at most 16 or 25 atoms. Dictionary directions are correlated and decomposition support is not unique. Setting the atom cap to 25 is not a measurement of J-space occupancy. The energy tables are not the paper's centered variance-explained metric. No new generation, task accuracy, inference speed or causal intervention is measured here.
+
+Source outputs: completed experiment \textit{jspace\_sparse\_analysis\_20261006}; independently reviewed task means and paired intervals: \textit{reviewed-task-summary.json}. Definitions are documented in the frozen experiment protocol. Paper: \href{https://transformer-circuits.pub/2026/workspace/index.html}{\textit{Transformer Circuits: Human-Interpretable Workspace}}.
+
+\end{document}

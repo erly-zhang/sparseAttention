@@ -67,6 +67,7 @@ METHODS = (
     "shareprefill_ae3_token_block_auto_dense_topp_mass",
     "shareprefill_per_head_token_topk",
     "shareprefill_ae3_representative_token_topk",
+    "shareprefill_ae3_representative_token_masa",
     "shareprefill_ae3_representative_token_topk_protected",
     "shareprefill_ae3_token_block_auto_target_protected",
     "shareprefill_per_head_token_block_auto",
@@ -380,6 +381,12 @@ def install_shareprefill_ae3_token_block_cover(
     measure_fixed_target_probability_mass: bool = False,
     query_score_mode: str = "four_probe_weighted",
     probe_weights: tuple[float, float, float, float] = (0.2, 0.3, 0.4, 0.1),
+    token_ranking: str = "qk",
+    masa_norm_alpha: float = 0.0,
+    masa_clip_percentile: Optional[float] = None,
+    masa_query_chunk_size: int = 16,
+    masa_query_mode: str = "four_probe",
+    masa_full_query_chunk_size: int = 128,
     token_chunk_size: int = 32,
     force_sink_block: bool = True,
     force_diagonal_block: bool = True,
@@ -407,6 +414,8 @@ def install_shareprefill_ae3_token_block_cover(
 ):
     """Install token-first selection followed by whole-K-block coverage."""
 
+    if token_ranking not in {"qk", "masa"}:
+        raise ValueError("token_ranking must be qk or masa")
     flex_root = Path(flexprefill_root)
     if not flex_root.is_dir():
         raise FileNotFoundError(f"FlexPrefill root not found: {flex_root}")
@@ -429,7 +438,15 @@ def install_shareprefill_ae3_token_block_cover(
         force_sink_target_tokens=force_sink_target_tokens,
         force_diagonal_target_tokens=force_diagonal_target_tokens,
         target_protected_token_span=target_protected_token_span,
-        selection_mode="token_first_block_cover",
+        selection_mode=(
+            "token_first_masa" if token_ranking == "masa"
+            else "token_first_block_cover"
+        ),
+        masa_norm_alpha=masa_norm_alpha,
+        masa_clip_percentile=masa_clip_percentile,
+        masa_query_chunk_size=masa_query_chunk_size,
+        masa_query_mode=masa_query_mode,
+        masa_full_query_chunk_size=masa_full_query_chunk_size,
         final_token_budget=final_token_budget,
         maximum_selected_blocks=maximum_selected_blocks,
         fill_final_token_budget=fill_final_token_budget,
@@ -487,6 +504,11 @@ def install_benchmark_method(
     record_sparsity: bool = False,
     block_f_beta: float = 2.0,
     fixed_topk_budget: int = 8192,
+    masa_norm_alpha: float = 0.0,
+    masa_clip_percentile: Optional[float] = None,
+    masa_query_chunk_size: int = 16,
+    masa_query_mode: str = "four_probe",
+    masa_full_query_chunk_size: int = 128,
     target_token_top_p: Optional[float] = None,
     target_top_p_start_layer: Optional[int] = None,
     flexprefill_min_budget: int = 1024,
@@ -675,6 +697,7 @@ def install_benchmark_method(
         "shareprefill_ae3_token_block_auto_dense_topp_mass",
         "shareprefill_per_head_token_topk",
         "shareprefill_ae3_representative_token_topk",
+        "shareprefill_ae3_representative_token_masa",
         "shareprefill_ae3_representative_token_topk_protected",
         "shareprefill_ae3_token_block_auto_target_protected",
         "shareprefill_per_head_token_block_auto",
@@ -729,6 +752,14 @@ def install_benchmark_method(
                 "protect_within_budget": False,
                 "implementation": "ae3_representative_fixed_topk_token_mask",
             },
+            "shareprefill_ae3_representative_token_masa": {
+                "per_head": False,
+                "project_to_blocks": False,
+                "protect_within_budget": False,
+                "implementation": "ae3_representative_masa_fixed_topk_token_mask",
+                "token_ranking": "masa",
+                "probe_weights": (0.25, 0.25, 0.25, 0.25),
+            },
             "shareprefill_ae3_representative_token_topk_protected": {
                 "per_head": False,
                 "project_to_blocks": False,
@@ -758,8 +789,16 @@ def install_benchmark_method(
         }
         if method in diagnostic_methods:
             diagnostic = diagnostic_methods[method]
+            is_masa = diagnostic.get("token_ranking") == "masa"
             patch, config = install_shareprefill_ae3_token_block_cover(
                 model,
+                token_ranking="masa" if is_masa else "qk",
+                probe_weights=diagnostic.get("probe_weights", (0.2, 0.3, 0.4, 0.1)),
+                masa_norm_alpha=masa_norm_alpha,
+                masa_clip_percentile=masa_clip_percentile,
+                masa_query_chunk_size=masa_query_chunk_size,
+                masa_query_mode=masa_query_mode,
+                masa_full_query_chunk_size=masa_full_query_chunk_size,
                 logical_key_block_size=(32, 64, 128),
                 group_config_path=group_config_path,
                 flexprefill_root=flexprefill_root,
@@ -811,6 +850,26 @@ def install_benchmark_method(
                 "num_groups_per_layer": int(config["num_groups_per_layer"]),
                 "online_config": {
                     "execution_query_tile_size": 128,
+                    "token_ranking": "masa" if is_masa else "weighted_qk_logits",
+                    "masa": ({
+                        "paper": "arXiv:2610.10871v1",
+                        "equations": [7, 8, 10, 11],
+                        "probe": "representative_kv_head_value",
+                        "norm_alpha": masa_norm_alpha,
+                        "clip_percentile": masa_clip_percentile,
+                        "clip_region": "full_prompt_per_batch_per_representative",
+                        "query_chunk_size": masa_query_chunk_size,
+                        "query_mode": masa_query_mode,
+                        "full_query_chunk_size": masa_full_query_chunk_size,
+                        "profile": ("all_actual_queries_per_128_token_tile" if masa_query_mode == "all_queries"
+                                    else "four_query_probes_per_128_token_tile"),
+                        "causality": ("actual_position_for_every_query" if masa_query_mode == "all_queries"
+                                      else "actual_position_for_three_probes_tile_end_for_mean"),
+                        "aggregation": ("mean_of_all_query_error_reductions" if masa_query_mode == "all_queries"
+                                        else "weighted_sum_of_per_probe_error_reductions"),
+                        "arithmetic": "float32",
+                        "negative_scores": "retained_if_required_by_fixed_topk_budget",
+                    } if is_masa else None),
                     "mask_source": (
                         "each_query_head"
                         if diagnostic["per_head"]
@@ -858,19 +917,16 @@ def install_benchmark_method(
                     "adaptive_coverage_tolerance": (
                         0.02 if diagnostic["project_to_blocks"] else None
                     ),
-                    "query_probes": [
-                        "one_third",
-                        "two_thirds",
-                        "last",
-                        "mean",
-                    ],
-                    "probe_aggregation": "weighted_average",
-                    "probe_weights": {
-                        "one_third": 0.2,
-                        "two_thirds": 0.3,
-                        "last": 0.4,
-                        "mean": 0.1,
-                    },
+                    "query_probes": (["all_actual_queries"]
+                        if is_masa and masa_query_mode == "all_queries" else [
+                            "one_third", "two_thirds", "last", "mean",
+                        ]),
+                    "probe_aggregation": ("equal_weight_mean_over_actual_queries"
+                        if is_masa and masa_query_mode == "all_queries" else "weighted_average"),
+                    "probe_weights": None if is_masa and masa_query_mode == "all_queries" else dict(zip(
+                        ["one_third", "two_thirds", "last", "mean"],
+                        diagnostic.get("probe_weights", (0.2, 0.3, 0.4, 0.1)),
+                    )),
                     "force_sink_block": bool(
                         diagnostic.get(
                             "force_blocks",

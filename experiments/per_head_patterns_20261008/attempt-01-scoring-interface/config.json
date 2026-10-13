@@ -1,0 +1,127 @@
+{
+  "model": "/ocean/projects/cis260309p/jzhang114/prefill-routing-deps/models/Llama-3.1-8B-Instruct",
+  "methods": [
+    "coverage_token_vertical_own_patterns",
+    "coverage_token_vertical_slash_own_patterns",
+    "random_token_vertical_own_patterns",
+    "random_token_vertical_slash_own_patterns"
+  ],
+  "scenarios": {
+    "coverage_token_vertical_own_patterns": {
+      "head_strategy": "coverage",
+      "selector_method": "representative_token_vertical"
+    },
+    "coverage_token_vertical_slash_own_patterns": {
+      "head_strategy": "coverage",
+      "selector_method": "representative_token_vertical_slash"
+    },
+    "random_token_vertical_own_patterns": {
+      "head_strategy": "random",
+      "selector_method": "representative_token_vertical"
+    },
+    "random_token_vertical_slash_own_patterns": {
+      "head_strategy": "random",
+      "selector_method": "representative_token_vertical_slash"
+    }
+  },
+  "layers": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31
+  ],
+  "selection": {
+    "query_tile_size": 128,
+    "probe_weights": [
+      0.2,
+      0.3,
+      0.4,
+      0.1
+    ],
+    "logical_key_block_sizes": [
+      32,
+      64,
+      128
+    ],
+    "minimum_block_coverage_ratio": 0.125,
+    "vertical_queries": 128,
+    "vertical_gamma": 0.95,
+    "vertical_max_tokens": null,
+    "token_chunk_size": 32,
+    "target_token_budget": 8192,
+    "target_token_top_p": null,
+    "autoblock_final_token_budget": 8192,
+    "adaptive_coverage_tolerance": 0.02,
+    "autoblock_force_sink": true,
+    "autoblock_force_diagonal": true,
+    "token_force_sink": false,
+    "token_force_diagonal": false,
+    "slash_gamma": 0.95,
+    "slash_max_offsets": null
+  },
+  "generation_seed": 42,
+  "prefill_only": true,
+  "full_kv_cache": true,
+  "dense_decode": true,
+  "training": false,
+  "samples_per_task": 50,
+  "tasks": [
+    "kv_retrieval",
+    "longbook_choice_eng",
+    "longbook_qa_eng",
+    "code_debug"
+  ],
+  "representatives": "reuse frozen 3-sample coverage calibration and fixed random seed 20261001",
+  "resources": {
+    "gpu": "h100-80",
+    "gpus_per_worker": 1,
+    "cpus": 8,
+    "memory_gb": 128,
+    "qos": "gpu",
+    "walltime_hours": 8,
+    "minimum_backfill_hours": 2,
+    "samples_per_worker": 5,
+    "workers": 160,
+    "concurrency_cap": null,
+    "aggregate_gpu_hours_limit": null
+  },
+  "comparison_methods": [
+    "dense_full",
+    "coverage_token_vertical",
+    "coverage_token_vertical_slash",
+    "random_token_vertical",
+    "random_token_vertical_slash",
+    "flexprefill",
+    "minference"
+  ],
+  "sentinel_key": "kv_retrieval-359",
+  "periodic_save_seconds": 300
+}
