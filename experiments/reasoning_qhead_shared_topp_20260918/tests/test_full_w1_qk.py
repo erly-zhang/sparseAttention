@@ -3,6 +3,11 @@
 These validate masks/scoring, not GPU attention kernels or generation speed.
 """
 import math
+import contextlib
+import io
+import os
+from pathlib import Path
+import runpy
 import unittest
 from unittest.mock import patch
 
@@ -31,6 +36,44 @@ def make(mode='qk', n=128, budget=96, protection='protected', dtype=torch.bfloat
 
 
 class FullW1QKTests(unittest.TestCase):
+    def test_optimized_entrypoint_defaults_to_raw_qk_and_preserves_explicit_control(self):
+        runner = Path(__file__).resolve().parents[1] / 'scripts/run_full_w1_optimized.py'
+        execute_runner = runpy.run_path
+        original_factory = grid.SelectorGridLayer
+        try:
+            for mode in ('qk', 'probability'):
+                with patch.dict(os.environ):
+                    os.environ.pop('RA_FULL_W1_SCORE_MODE', None)
+                    os.environ.pop('RA_FULL_W1_RANK_BACKEND', None)
+                    if mode == 'probability':
+                        os.environ['RA_FULL_W1_SCORE_MODE'] = mode
+                    # Run the real entrypoint; stop only at the model-loading runner.
+                    with patch.object(runpy, 'run_path') as eval_runner, \
+                            contextlib.redirect_stdout(io.StringIO()) as log:
+                        execute_runner(str(runner), run_name='__main__')
+                    eval_runner.assert_called_once()
+                    self.assertIn('score_mode=' + mode, log.getvalue())
+                    layer = make(mode=mode)
+                    args = (3, 96, 0, 'grid_full_w1_topk_protected', 0., False, False)
+                    selected_class = grid.SelectorGridLayer(*args, query_window=1,
+                                                           eviction_interval=1)
+                    self.assertEqual(selected_class.score_mode, mode)
+                    # Exercise the actual runner-installed selection implementation.
+                    selected_class.__dict__.update(layer.__dict__)
+                    if mode == 'qk':
+                        with patch.object(torch.Tensor, 'softmax',
+                                          side_effect=AssertionError('selector softmax')):
+                            ids, counts = selected_class.select_indices()
+                        raw = (selected_class.queries[:, selected_class._rep_head, :1] @
+                               selected_class.k_cache[:, :128, selected_class._rep_kv].transpose(1, 2)).squeeze(1)
+                        self.assertTrue(torch.equal(selected_class._last_scores, raw))
+                    else:
+                        ids, counts = selected_class.select_indices()
+                    self.assertEqual(ids.shape, (2, 96))
+                    self.assertEqual(counts, [96, 96])
+        finally:
+            grid.SelectorGridLayer = original_factory
+
     def test_single_query_softmax_rank_equivalence_without_extra_rounding_ties(self):
         scores = torch.tensor([[-9., -2., -2., 0., .5, .5, 3.],
                                [7., 5., 5., 3., 2., 1., -4.]], dtype=torch.float64)

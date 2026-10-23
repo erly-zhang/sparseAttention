@@ -60,6 +60,9 @@ class EvictCache(Cache):
         elif eviction_mode == 'official_random_pp':
             from kvcompress.engine.official_random_pp_cache import OfficialRandomPPLayer
             layer_type = OfficialRandomPPLayer
+        elif eviction_mode in ('official_snapkv', 'official_rkv', 'official_vase', 'official_triattn'):
+            from kvcompress.engine.official_baselines_cache import OfficialBaselineLayer
+            layer_type = OfficialBaselineLayer
         elif eviction_mode == 'qhead_shared_mask_w1_recent_gpu':
             from kvcompress.engine.w1_recent_shared_mask_cache import W1RecentSharedMaskLayer
             layer_type = W1RecentSharedMaskLayer
@@ -131,6 +134,9 @@ class EvictCache(Cache):
         if eviction_mode == "triattn_ph":
             for _lyr in layers:
                 _lyr._sibling_layers = layers
+        if eviction_mode in ('official_snapkv', 'official_rkv', 'official_vase', 'official_triattn'):
+            from kvcompress.engine.official_baselines_cache import wire_cache
+            wire_cache(eviction_mode, layers)
         # GENERATION-BOUNDARY MEMO RESET (08-04 audit, must-fix #1). The triattn_ph cross-layer
         # keep-set memo is a single module-global slot. Without this reset, if problem A ends exactly
         # one eviction round after its first compaction and problem B ties on the whole key

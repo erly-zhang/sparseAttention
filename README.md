@@ -11,6 +11,12 @@ MInference.
 
 ## Current Reasoning Experiments
 
+The maintained [current report](../report_build/current/hmmt_results_en.pdf),
+[complete result catalog](experiments/reasoning_qhead_shared_topp_20260918/RESULTS.md)
+and [code guide](experiments/reasoning_qhead_shared_topp_20260918/CODE_INDEX.md)
+include the completed14 October2026 results. The fused v3 W1 implementation is
+validation-only and has no new full-HMMT result.
+
 See [the reasoning experiment guide](experiments/reasoning_qhead_shared_topp_20260918/README.md)
 for the current W1, random shared-mask, physical KV compression and official
 `random_pp` implementations, validation and reproduction requirements.

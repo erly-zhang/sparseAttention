@@ -1,137 +1,77 @@
-# Shared-mask reasoning attention
+# Shared KV selection and compression
 
-This directory contains Qwen3-4B decode-time attention experiments on MATH500,
-HMMT, GPQA-Diamond, AIME, and LiveCodeBench, plus matched official `random_pp`
-controls. Prefill uses dense attention. Historical methods and tests remain
-available where they are needed to reproduce reference comparisons.
+Updated 14 October 2026. This is the maintained entry point for the Qwen3-4B
+reasoning experiments. Begin with the links below rather than dated trial files.
 
-## Current W1 implementation
-
-Each layer selects one representative Q head using a private deterministic
-generator keyed by representative seed, canonical input identity, layer and
-absolute decode step. For GQA, Q head h reads KV head h divided by the number
-of Q heads sharing one KV head. All heads in a layer share selected token
-positions; each KV head retains its own K/V values. Layers and rollouts can
-select different positions.
-
-Raw-QK W1 ranks the current post-RoPE query/key dot products directly, without
-a selector softmax. Equal BF16 scores prefer earlier chronological positions.
-Actual attention still uses its ordinary scaling and softmax. Raw-QK masks need
-not be bitwise identical to the historical probability scores because scaling,
-rounding and softmax underflow can produce different ties.
-
-The fixed total attention budget K includes all prompt positions and the latest
-64 reasoning positions. Protected positions are excluded before ranking the
-remaining candidates. This total-K convention differs from older
-`reasoning1024` methods, which give the prompt an additional budget.
-
-| Method | Decode attention | Physical cache |
-|---|---|---|
-| Full-history W1 | Select K every forward | Retain all historical KV |
-| Periodic W1 compression | Attend all surviving KV plus new tokens | After attention every 64, 500 or 1000 steps, compress to K |
-| W1 plus random4096 candidates | Select K every forward | After attention every 1000 steps, retain that core plus 4096 random positions from its complement |
-
-The hybrid method skips physical eviction when all candidates fit in K+4096.
-New KV accumulates between updates, so live capacity is K+4096+1000; the 4096
-extra candidates do not participate in attention unless W1 selects them on a
-later step. Uniform float32 priorities and independent secondary random bits
-select distinct residual positions. The core is masked before random TopK.
-Private mask RNG does not change generation sampling RNG. Original RoPE
-positions remain attached to keys after chronological compaction.
-
-## Implementation and launch entry points
-
-| Purpose | Files |
+| Purpose | Entry |
 |---|---|
-| Historical full/compact selector oracle | `ra_harness/kvcompress/engine/selector_grid_cache.py` |
-| Optimized full-history W1 | `ra_harness/kvcompress/engine/full_w1_optimized_cache.py` |
-| Compact1000 and hybrid random4096 | `ra_harness/kvcompress/engine/w1_interval1000_cache.py` |
-| Opt-in full raw-QK runner | `scripts/run_full_w1_qk.py` |
-| Opt-in full/compact500 raw-QK runner | `scripts/run_w1_qk.py` |
-| Opt-in compact1000/hybrid1000 runner | `scripts/run_w1_interval1000.py` |
-| Freeze and submit latest HMMT runs | `scripts/prepare_hmmt_w1_interval1000.py`, `scripts/submit_hmmt_w1_interval1000.py` |
-| Matched official random_pp | `scripts/hmmt_official_random_pp.py`, `scripts/run_official_random_pp.py` |
-| Shared random64-step compression across datasets | `scripts/prepare_compact_multibench.py`, `scripts/run_compact_multibench.py` |
-| Correct-answer output length analysis | `scripts/analyze_hmmt_correct_output_lengths_20261011.py` |
+| Current English report, Times New Roman | [PDF](../../../report_build/current/hmmt_results_en.pdf) · [HTML](../../../report_build/current/index.html) |
+| All complete results and exact configurations | [RESULTS.md](RESULTS.md) |
+| Current code, versions and environment | [CODE_INDEX.md](CODE_INDEX.md) |
+| Six current runner/maintenance aliases | [scripts/current/](scripts/current/README.md) |
+| Current versus historical reports | [REPORTS.md](REPORTS.md) |
+| Machine-readable complete result catalog | [CSV](results/current/results.csv) · [JSON](results/current/summary.json) |
 
-Implementations are enabled by process-local factory installation. Existing
-launches and frozen reference sources are not silently switched to new methods.
-The vendored official random-attention implementation retains its license,
-third-party notices, and provenance.
+## Current result status
 
-## HMMT settings and validation
+The main PDF is a3-page comparison of8 latest protected raw-QK W1 / Dense /
+official random_pp configurations. Earlier controls and other datasets are in
+`historical_results_en.pdf`; v3 single-layer evidence is in `w1_v3_validation_en.pdf`.
+There are no lookup IDs in the reader-facing report. The complete catalog below
+is an evidence archive, not the main report's selection of current methods.
 
-The latest configurations use Qwen3-4B, BF16, batch2, seed42, representative
-seed0, generation temperature 0.6, generation Top-p 0.95, and total prompt plus
-output limit 32768. Each method runs the same 60 inputs with two sampled outputs
-each. Accuracy is correct outputs divided by 120, not pass@2 or 120 distinct
-questions. K=1024 runs precede K=2048 runs.
+The catalog contains60 current complete groups:46 HMMT,10 MATH500 and four
+other completed dataset splits. Three older, exactly equivalent implementations
+are retained in implementation history. Different algorithms remain controls.
+There are no incomplete or profiling-only accuracy rows in the current table.
 
-Each launch freezes source/configuration/data and records SHA-256 provenance.
-GPU correctness must pass before complete generation on the same three smoke
-inputs. Both method smokes must pass input and analytic attention-pair checks
-before formal shards start. Collection requires 60 unique input records and 120
-unique `(idx,run)` grades, exact input token counts and input-ID hashes, and
-`input_alignment=passed/full`. Incomplete runs do not receive formal accuracy.
+HMMT uses Qwen3-4B, BF16, batch2, seed42, representative seed0, temperature0.6,
+generation Top-p0.95 and a total prompt+output cap32768. The same60 questions
+produce two sampled outputs each; accuracy is correct/120, not pass@2.
 
-GPU-synchronized decode wall time includes selection, random priorities,
-sorting, gathering, physical compaction, attention, sampling and bookkeeping.
-It excludes model loading, warmup, and metric serialization. Decode seconds
-per question measure a batch generating two outputs together. Output length
-is measured per individual output and excludes the prompt. Consequently,
-output mean length and batch forward count are different metrics.
+- Dense:48/120 (40.00%).
+- Full-KV raw-QK W1, K1024, optimized v2:48/120 (40.00%).
+- Raw-QK W1 + random4096, K1024, optimized v2:46/120 (38.33%).
+- Raw-QK W1 compact1000, K2048:40/120 (33.33%).
+- Raw-QK W1 + random4096, K2048, interval1000:55/120 (45.83%).
 
-Tests include independent mask and FP32 attention references, GQA, protection,
-short histories, stable ties, absolute positions, two physical compression
-events, private RNG, residual sampling sanity and active-batch shrink.
+The fused v3 implementation passed GPU correctness and single-layer timing
+checks at K1024/K2048. It has no new full-Qwen3-4B/HMMT result and is not the
+default. See [v3 evidence](W1_RAW_QK_FUSED_OPTIMIZATION_20261014.md).
 
-From this directory, in the reasoning environment:
+## Method flow
 
-```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=ra_harness OMP_NUM_THREADS=1 \
-  python -m unittest discover -s tests -p test_w1_interval1000.py -v
-```
+All methods use dense prefill. Raw-QK W1 uses the current post-RoPE representative
+query to rank live keys, with correct GQA mapping and earlier-position ties.
+All heads in one layer share selected positions, preserving their own KV values.
+Prompt+recent64 protection counts inside the total attention budget K.
 
-CUDA checks are skipped on a CPU-only node. Formal GPU checks require an
-independent scheduler allocation and an A100 80GB GPU.
+| Method | Attention during decode | Physical KV |
+|---|---|---|
+| Dense | All historical keys | Full history |
+| Full-KV W1 | Select K every step | Full history |
+| Compact W1 / Shared Random | All surviving keys plus newly appended KV | Compress to K after attention every64/500/1000 steps |
+| W1 + random4096 | Select K every step | Every1000 steps retain that W1 core plus4096 random positions outside it |
 
-## Environment and local reproduction inputs
+The hybrid pool grows between updates to at most K+4096+1000. Random4096
+positions are candidates for future W1 selection, not extra attention keys.
+Historical probability scores and older extra-prompt `reasoning1024` budgets
+are distinct configurations; they remain separately labeled.
 
-Reasoning runs use the `random-attention` conda environment: Python 3.10,
-PyTorch 2.4.0+cu121, Transformers 5.0.0, FlashAttention 2.7.3, and NumPy 2.2.6.
-This differs from the SharePrefill environment in the repository's
-`ENVIRONMENT.md`; do not substitute that environment for these runs.
-
-Cluster launchers retain their recorded scheduler account and installation
-paths. Adapt these to another cluster before submitting. Model weights,
-authorized dataset files, input references, previous results and frozen run
-templates are local artifacts and are excluded from Git. The preparation
-scripts deliberately require these reference artifacts to preserve input and
-baseline alignment; a fresh Git clone alone is not enough for a formal rerun.
-The latest preparation script requires the completed raw-QK K1024
-full/compact500 reference directory; K2048 comparisons additionally reference
-the existing probability-scored full and compact500 experiments. Those K2048
-comparisons therefore also change score arithmetic and do not isolate only
-the compression interval.
-
-After restoring the required local artifacts, the latest launch workflow is:
+## Maintenance
 
 ```bash
-python scripts/prepare_hmmt_w1_interval1000.py --budget 1024
-python scripts/submit_hmmt_w1_interval1000.py --budget 1024
-python scripts/prepare_hmmt_w1_interval1000.py --budget 2048
-python scripts/submit_hmmt_w1_interval1000.py --budget 2048 --after K1024_COLLECT_JOB_ID
+/usr/bin/python3 scripts/current/refresh_results.py --check
+/usr/bin/python3 scripts/current/refresh_results.py
+/usr/bin/python3 scripts/current/build_report.py
 ```
 
-Preparation and submission refuse existing sealed runs or duplicate launches.
-Do not run these commands on an already submitted directory. Results retain
-immutable sources even when the maintained checkout is reorganized.
+These commands perform CPU-only validation/reporting and submit no experiments.
+They replace only derived current tables and reports. Raw runs, frozen sources,
+outputs and grading evidence remain unchanged. See the code guide for inference
+assets, configuration and scheduler preparation.
 
-## Repository cleanup
-
-The approved 2026-10-11 cleanup removed duplicate debug source, a redundant
-Protocol B copy, two early one-off Top-p launchers, edit backups and Python
-cache files. Unique baseline implementations, tests, raw outputs, retained
-Protocol B sources and running experiment snapshots were preserved. A local
-rollback archive and exact hashed deletion manifest were recorded outside
-the Git repository.
+The [previous detailed guide](docs/history/README_before_20261014.md) is retained
+for historical reference; its dated status and launch examples are not the
+current experiment state. Archived runs remain indexed under results/archive/.
+J-lens and Llama prefill/KV-retrieval studies are separate projects.

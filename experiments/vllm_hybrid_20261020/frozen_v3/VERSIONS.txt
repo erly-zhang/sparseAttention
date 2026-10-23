@@ -1,0 +1,8 @@
+v3.0 (manifest_v3.0_initial.json, 99fd7c08...): first SnapKV/R-KV/VaSE port. Used by all 12 throughput runs.
+v3.1 (manifest_v3.1_slotfix.json, 9c3c215f...): query-ring slots reclaimed only for finished requests.
+v3.2 (manifest.json): runtime PROTECT_PREFILL=1 for event-handling parity with random_pp/TriAttention
+      (selection still unprotected, as upstream) + keep-all at or below KV_BUDGET. Fixes the prefill-time
+      event (scheduler double-counts the prompt, e.g. MATH500 idx 168, 690 tokens) that aborted v3.0/v3.1
+      accuracy runs. Throughput runs never reached these paths (0 events at or below K, 0 under-budget
+      skips in their logs; all prompts 512/1024 tokens below the prefill-trigger point), so their
+      behaviour is identical under v3.2 and they are kept.

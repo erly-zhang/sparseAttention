@@ -33,6 +33,17 @@ PYTHONPATH=ra_harness python scripts/run_full_w1_optimized.py \
   --eviction_mode grid_full_w1_topk_protected [other eval_hf arguments]
 ```
 
+As of 2026-10-12, this maintained entry point defaults to raw-QK scoring for
+the current query. It retains all implementation optimizations listed above,
+but skips selector division, softmax and the one-query mean. Attention itself
+continues to apply its normal scaling and softmax. The explicit
+`scripts/run_full_w1_qk.py` entry point uses the same raw-QK implementation.
+Use `RA_FULL_W1_SCORE_MODE=probability` with the optimized entry point to
+reproduce the probability arithmetic described in the historical experiments
+below. The packed TopK backend is supported only for probability scores.
+Equal raw-QK scores prefer earlier positions; finite-precision masks and
+generated trajectories can differ from the probability mode.
+
 The wrapper opts in only in its own process. Existing runners and frozen
 experiment sources continue to use the historical implementation. Modes other
 than full/W1/TopK use the original selector class.

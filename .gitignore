@@ -66,3 +66,9 @@ environment-validation.json
 *.backup.*
 *.before_*
 *.orig
+
+# Reasoning / vLLM study run outputs and job logs (kept on the cluster, not in git)
+experiments/**/logs/
+experiments/vllm_hybrid_20261020/results*/
+experiments/vllm_hybrid_20261020/smoke*/
+experiments/vllm_hybrid_20261020/inputs_ids/
